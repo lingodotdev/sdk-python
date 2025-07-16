@@ -111,9 +111,8 @@ version_variables = [
     "src/lingodotdev/__init__.py:__version__",
 ]
 build_command = "python -m build"
-dist_path = "dist/"
-upload_to_pypi = false  # We'll use trusted publishing instead
-upload_to_release = true
+dist_glob_patterns = ["dist/*"]
+upload_to_vcs_release = true
 remove_dist = false
 
 [tool.semantic_release.commit_parser_options]
@@ -123,8 +122,10 @@ patch_tags = ["fix", "perf"]
 
 [tool.semantic_release.changelog]
 template_dir = "templates"
-changelog_file = "CHANGELOG.md"
 exclude_commit_patterns = []
+
+[tool.semantic_release.changelog.default_templates]
+changelog_file = "CHANGELOG.md"
 
 [tool.semantic_release.branches.main]
 match = "main"

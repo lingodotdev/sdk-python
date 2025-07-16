@@ -81,7 +81,7 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        semantic-release version
+        semantic-release version --no-push
 
     - name: Build package
       run: |
@@ -96,4 +96,4 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        semantic-release publish --skip-pypi
+        semantic-release publish
