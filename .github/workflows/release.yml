@@ -82,10 +82,17 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        if semantic-release version --print | grep -q "No release will be made"; then
+        # Check if semantic-release would create a release
+        VERSION_OUTPUT=$(semantic-release version --print 2>&1)
+        if echo "$VERSION_OUTPUT" | grep -q "No release will be made"; then
           echo "release_needed=false" >> $GITHUB_OUTPUT
+          echo "No release needed: $VERSION_OUTPUT"
+        elif echo "$VERSION_OUTPUT" | grep -q "already exists"; then
+          echo "release_needed=false" >> $GITHUB_OUTPUT
+          echo "Version already exists: $VERSION_OUTPUT"
         else
           echo "release_needed=true" >> $GITHUB_OUTPUT
+          echo "Release needed: $VERSION_OUTPUT"
         fi
 
     - name: Run semantic release (version)
@@ -93,7 +100,7 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        semantic-release version --no-push
+        semantic-release version
 
     - name: Build package
       if: steps.check_release.outputs.release_needed == 'true'
