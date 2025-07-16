@@ -350,17 +350,11 @@ class LingoDotDevEngine:
             wrapped_progress_callback
         )
         
-        result = []
-        for key, value in localized.items():
-            if key.startswith('chat_'):
-                index = int(key.split('_')[1])
-                if index < len(chat):
-                    result.append({
-                        'name': chat[index]['name'],
-                        'text': value
-                    })
+        # The API returns the localized chat in the same structure
+        if 'chat' in localized and isinstance(localized['chat'], list):
+            return localized['chat']
         
-        return result
+        return []
 
     def recognize_locale(self, text: str) -> str:
         """

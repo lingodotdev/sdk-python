@@ -229,8 +229,10 @@ class TestLingoDotDevEngine:
     def test_localize_chat(self, mock_localize_raw):
         """Test chat localization"""
         mock_localize_raw.return_value = {
-            "chat_0": "hola",
-            "chat_1": "adiós"
+            "chat": [
+                {"name": "Alice", "text": "hola"},
+                {"name": "Bob", "text": "adiós"}
+            ]
         }
         
         chat = [
