@@ -3,7 +3,7 @@
 [![PyPI version](https://badge.fury.io/py/lingodotdev.svg)](https://badge.fury.io/py/lingodotdev)
 [![Python support](https://img.shields.io/pypi/pyversions/lingodotdev)](https://pypi.org/project/lingodotdev/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Tests](https://github.com/lingodotdev/sdk-python/workflows/Test/badge.svg)](https://github.com/lingodotdev/sdk-python/actions)
+[![Tests](https://github.com/lingodotdev/sdk-python/workflows/Pull%20Request/badge.svg)](https://github.com/lingodotdev/sdk-python/actions)
 [![Coverage](https://codecov.io/gh/lingodotdev/sdk-python/branch/main/graph/badge.svg)](https://codecov.io/gh/lingodotdev/sdk-python)
 
 A powerful Python SDK for the Lingo.dev localization platform. This SDK provides easy-to-use methods for localizing various content types including plain text, objects, and chat sequences.
@@ -369,9 +369,36 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+3. Make your changes and add tests
+4. Commit your changes using [Conventional Commits](https://www.conventionalcommits.org/):
+   - `feat: add new feature`
+   - `fix: resolve bug`
+   - `docs: update documentation`
+   - `style: format code`
+   - `refactor: refactor code`
+   - `test: add tests`
+   - `chore: update dependencies`
+5. Push to the branch (`git push origin feature/amazing-feature`)
+6. Open a Pull Request
+
+### Release Process
+
+This project uses automated semantic releases:
+
+- **Pull Requests**: Automatically run tests and build checks
+- **Main Branch**: Automatically analyzes commit messages, bumps version, updates changelog, and publishes to PyPI
+- **Commit Messages**: Must follow [Conventional Commits](https://www.conventionalcommits.org/) format
+  - `feat:` triggers a minor version bump (0.1.0 → 0.2.0)
+  - `fix:` triggers a patch version bump (0.1.0 → 0.1.1)
+  - `BREAKING CHANGE:` triggers a major version bump (0.1.0 → 1.0.0)
+
+### Development Workflow
+
+1. Create a feature branch
+2. Make changes with proper commit messages
+3. Open a PR (triggers CI/CD)
+4. Merge to main (triggers release if applicable)
+5. Automated release to PyPI
 
 ## Support
 

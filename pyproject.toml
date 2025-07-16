@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lingodotdev"
-dynamic = ["version"]
+version = "0.1.0"
 description = "Lingo.dev Python SDK"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -43,6 +43,7 @@ dev = [
     "flake8>=6.0.0",
     "mypy>=1.0.0",
     "types-requests>=2.25.0",
+    "python-semantic-release>=8.0.0",
 ]
 
 [project.urls]
@@ -51,8 +52,6 @@ Documentation = "https://lingo.dev/docs"
 Repository = "https://github.com/lingodotdev/sdk-python"
 Issues = "https://github.com/lingodotdev/sdk-python/issues"
 
-[tool.hatch.version]
-path = "src/lingodotdev/__init__.py"
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -102,3 +101,30 @@ python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "--cov=src/lingodotdev --cov-report=term-missing --cov-report=html"
+
+[tool.semantic_release]
+version_toml = [
+    "pyproject.toml:project.version",
+]
+version_variables = [
+    "src/lingodotdev/__init__.py:__version__",
+]
+build_command = "python -m build"
+dist_path = "dist/"
+upload_to_pypi = false  # We'll use trusted publishing instead
+upload_to_release = true
+remove_dist = false
+
+[tool.semantic_release.commit_parser_options]
+allowed_tags = ["build", "chore", "ci", "docs", "feat", "fix", "perf", "style", "refactor", "test"]
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf"]
+
+[tool.semantic_release.changelog]
+template_dir = "templates"
+changelog_file = "CHANGELOG.md"
+exclude_commit_patterns = []
+
+[tool.semantic_release.branches.main]
+match = "main"
+prerelease = false
