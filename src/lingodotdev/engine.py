@@ -366,7 +366,7 @@ class LingoDotDevEngine:
         Returns:
             A locale code (e.g., 'en', 'es', 'fr')
         """
-        if not text.strip():
+        if not text or not text.strip():
             raise ValueError("Text cannot be empty")
 
         url = urljoin(self.config.api_url, "/recognize")
