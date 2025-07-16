@@ -8,7 +8,7 @@
 [![Tests](https://github.com/lingodotdev/sdk-python/workflows/Pull%20Request/badge.svg)](https://github.com/lingodotdev/sdk-python/actions)
 [![Coverage](https://codecov.io/gh/lingodotdev/sdk-python/branch/main/graph/badge.svg)](https://codecov.io/gh/lingodotdev/sdk-python)
 
-A powerful Python SDK for the Lingo.dev localization platform. This SDK provides easy-to-use methods for localizing various content types including plain text, objects, and chat sequences.
+A powerful Python SDK for the Lingo.dev localization platform. This SDK provides easy-to-use methods for localizing various content types including plain text, objects, and chat sequences. 
 
 ## Features
 
