@@ -159,7 +159,7 @@ class TestLingoDotDevEngine:
         mock_response.reason = "Bad Request"
         mock_post.return_value = mock_response
 
-        with pytest.raises(ValueError, match="Invalid request"):
+        with pytest.raises(ValueError, match="Invalid request \\(400\\)"):
             self.engine._localize_chunk(
                 "en", "es", {"data": {"key": "value"}}, "workflow_id", False
             )
