@@ -148,7 +148,7 @@ class LingoDotDevEngine:
                         f"{response.text}. This may be due to temporary service issues."
                     )
                 elif response.status_code == 400:
-                    raise ValueError(f"Invalid request: {response.reason}")
+                    raise ValueError(f"Invalid request ({response.status_code}): {response.reason}")
                 else:
                     raise RuntimeError(response.text)
 
