@@ -19,6 +19,7 @@ A powerful Python SDK for the Lingo.dev localization platform. This SDK provides
 - 📊 **Fast Mode**: Optional fast processing for larger batches
 - 🛡️ **Type Safety**: Full type hints and Pydantic validation
 - 🧪 **Well Tested**: Comprehensive test suite with high coverage
+- 🔧 **Easy Configuration**: Simple setup with minimal configuration required
 
 ## Installation
 
