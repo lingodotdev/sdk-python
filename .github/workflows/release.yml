@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Create Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        body: |
+          ## Changes in this release
+          
+          See the [changelog](CHANGELOG.md) for detailed information.
+          
+          ## Installation
+          
+          ```bash
+          pip install lingo-dev-sdk
+          ```
+          
+          ## Documentation
+          
+          For detailed usage instructions, see the [README](README.md).
+        draft: false
+        prerelease: false
