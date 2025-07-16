@@ -1,5 +1,7 @@
 # Lingo.dev Python SDK
 
+> 💬 **[Join our Discord community](https://lingo.dev/go/discord)** for support, discussions, and updates!
+
 [![PyPI version](https://badge.fury.io/py/lingodotdev.svg)](https://badge.fury.io/py/lingodotdev)
 [![Python support](https://img.shields.io/pypi/pyversions/lingodotdev)](https://pypi.org/project/lingodotdev/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -31,10 +33,7 @@ from lingodotdev import LingoDotDevEngine
 
 # Initialize the engine
 engine = LingoDotDevEngine({
-    'api_key': 'your-api-key-here',
-    'api_url': 'https://engine.lingo.dev',  # Optional, defaults to this URL
-    'batch_size': 25,  # Optional, defaults to 25
-    'ideal_batch_item_size': 250  # Optional, defaults to 250
+    'api_key': 'your-api-key-here'
 })
 
 # Localize a simple text
@@ -82,9 +81,6 @@ engine = LingoDotDevEngine(config)
 **Parameters:**
 - `config` (dict): Configuration dictionary with the following options:
   - `api_key` (str, required): Your Lingo.dev API key
-  - `api_url` (str, optional): API endpoint URL (default: `https://engine.lingo.dev`)
-  - `batch_size` (int, optional): Maximum number of items per batch (default: 25, max: 250)
-  - `ideal_batch_item_size` (int, optional): Target size for batch items (default: 250, max: 2500)
 
 #### Methods
 
@@ -95,10 +91,9 @@ Localize a single text string.
 **Parameters:**
 - `text` (str): The text to localize
 - `params` (dict): Localization parameters
-  - `source_locale` (str, optional): Source language code (e.g., 'en')
-  - `target_locale` (str, required): Target language code (e.g., 'es')
-  - `fast` (bool, optional): Enable fast mode for better performance on larger batches
-- `progress_callback` (callable, optional): Progress callback function
+  - `source_locale` (str): Source language code (e.g., 'en')
+  - `target_locale` (str): Target language code (e.g., 'es')
+- `progress_callback` (callable): Progress callback function
 
 **Returns:** `str` - The localized text
 
@@ -108,8 +103,7 @@ result = engine.localize_text(
     "Welcome to our application",
     {
         'source_locale': 'en',
-        'target_locale': 'es',
-        'fast': True
+        'target_locale': 'es'
     }
 )
 ```
@@ -121,7 +115,7 @@ Localize a Python dictionary with string values.
 **Parameters:**
 - `obj` (dict): The object to localize
 - `params` (dict): Localization parameters (same as `localize_text`)
-- `progress_callback` (callable, optional): Progress callback function
+- `progress_callback` (callable): Progress callback function
 
 **Returns:** `dict` - The localized object with the same structure
 
@@ -151,9 +145,8 @@ Localize a text string to multiple target languages.
 **Parameters:**
 - `text` (str): The text to localize
 - `params` (dict): Batch localization parameters
-  - `source_locale` (str, required): Source language code
-  - `target_locales` (list, required): List of target language codes
-  - `fast` (bool, optional): Enable fast mode
+  - `source_locale` (str): Source language code
+  - `target_locales` (list): List of target language codes
 
 **Returns:** `list` - List of localized strings in the same order as target_locales
 
@@ -163,8 +156,7 @@ results = engine.batch_localize_text(
     "Welcome to our platform",
     {
         'source_locale': 'en',
-        'target_locales': ['es', 'fr', 'de', 'it'],
-        'fast': True
+        'target_locales': ['es', 'fr', 'de', 'it']
     }
 )
 ```
@@ -303,23 +295,6 @@ result = engine.localize_object(
 )
 ```
 
-### Configuration Options
-
-```python
-# Optimized for large batches
-engine = LingoDotDevEngine({
-    'api_key': 'your-api-key',
-    'batch_size': 100,  # Larger batches
-    'ideal_batch_item_size': 1000  # Larger items per batch
-})
-
-# Optimized for small, frequent requests
-engine = LingoDotDevEngine({
-    'api_key': 'your-api-key',
-    'batch_size': 10,  # Smaller batches
-    'ideal_batch_item_size': 100  # Smaller items per batch
-})
-```
 
 ## Development
 
@@ -409,3 +384,7 @@ This project uses automated semantic releases:
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for a detailed history of changes.
+
+---
+
+> 💬 **[Join our Discord community](https://lingo.dev/go/discord)** for support, discussions, and updates!
