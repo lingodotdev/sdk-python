@@ -1,6 +1,7 @@
 """
 LingoDotDevEngine implementation for Python SDK
 """
+
 # mypy: disable-error-code=unreachable
 
 from typing import Any, Callable, Dict, List, Optional
