@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lingodotdev"
-version = "1.0.3"
+version = "1.0.4"
 description = "Lingo.dev Python SDK"
 readme = "README.md"
 requires-python = ">=3.8"
