@@ -380,7 +380,7 @@ This project uses automated semantic releases:
 
 - 📧 Email: [hi@lingo.dev](mailto:hi@lingo.dev)
 - 🐛 Issues: [GitHub Issues](https://github.com/lingodotdev/sdk-python/issues)
-- 📖 Documentation: [https://lingo.dev/docs](https://lingo.dev/docs)
+- 📖 Documentation: [https://lingo.dev/sdk](https://lingo.dev/sdk)
 
 ## Changelog
 
