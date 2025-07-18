@@ -4,37 +4,24 @@ LingoDotDevEngine implementation for Python SDK
 
 # mypy: disable-error-code=unreachable
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 from urllib.parse import urljoin
 
 import requests
 from nanoid import generate
-from pydantic import BaseModel, Field, field_validator
 
-
-class EngineConfig(BaseModel):
-    """Configuration for the LingoDotDevEngine"""
-
-    api_key: str
-    api_url: str = "https://engine.lingo.dev"
-    batch_size: int = Field(default=25, ge=1, le=250)
-    ideal_batch_item_size: int = Field(default=250, ge=1, le=2500)
-
-    @field_validator("api_url")
-    @classmethod
-    def validate_api_url(cls, v: str) -> str:
-        if not v.startswith(("http://", "https://")):
-            raise ValueError("API URL must be a valid HTTP/HTTPS URL")
-        return v
-
-
-class LocalizationParams(BaseModel):
-    """Parameters for localization requests"""
-
-    source_locale: Optional[str] = None
-    target_locale: str
-    fast: Optional[bool] = None
-    reference: Optional[Dict[str, Dict[str, Any]]] = None
+# Import our enhanced models and types
+from .models import EnhancedEngineConfig, LocalizationParams
+from .types import EngineConfigDict
+from .retry import RetryHandler
+from .exceptions import (
+    LingoDevError,
+    LingoDevAPIError,
+    LingoDevNetworkError,
+    LingoDevConfigurationError,
+    create_api_error_from_response,
+    create_network_error_from_exception,
+)
 
 
 class LingoDotDevEngine:
@@ -44,14 +31,31 @@ class LingoDotDevEngine:
     plain text, objects, chat sequences, and HTML documents.
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Union[Dict[str, Any], EngineConfigDict]):
         """
         Create a new LingoDotDevEngine instance
 
         Args:
-            config: Configuration options for the Engine
+            config: Configuration options for the Engine (dict or EngineConfigDict)
         """
-        self.config = EngineConfig(**config)
+        # Enhanced configuration with backward compatibility
+        if isinstance(config, dict):
+            try:
+                self.config = EnhancedEngineConfig(**config)
+            except Exception as e:
+                raise LingoDevConfigurationError(
+                    f"Invalid engine configuration: {str(e)}",
+                    details={"provided_config": config}
+                )
+        else:
+            self.config = config
+        
+        # Initialize retry handler if retry is enabled
+        self.retry_handler = None
+        if self.config.retry_config:
+            self.retry_handler = RetryHandler(self.config.retry_config)
+        
+        # Initialize HTTP session with timeout support
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -59,6 +63,15 @@ class LingoDotDevEngine:
                 "Authorization": f"Bearer {self.config.api_key}",
             }
         )
+        
+        # Set timeout for all requests
+        if hasattr(self.session, 'request'):
+            original_request = self.session.request
+            def request_with_timeout(*args, **kwargs):
+                if 'timeout' not in kwargs:
+                    kwargs['timeout'] = self.config.timeout
+                return original_request(*args, **kwargs)
+            self.session.request = request_with_timeout
 
     def _localize_raw(
         self,
@@ -127,43 +140,65 @@ class LingoDotDevEngine:
         Returns:
             Localized chunk
         """
-        url = urljoin(self.config.api_url, "/i18n")
+        def _make_request() -> Dict[str, str]:
+            """Internal function to make the API request"""
+            url = urljoin(self.config.api_url, "/i18n")
 
-        request_data = {
-            "params": {"workflowId": workflow_id, "fast": fast},
-            "locale": {"source": source_locale, "target": target_locale},
-            "data": payload["data"],
-        }
+            request_data = {
+                "params": {"workflowId": workflow_id, "fast": fast},
+                "locale": {"source": source_locale, "target": target_locale},
+                "data": payload["data"],
+            }
 
-        if payload.get("reference"):
-            request_data["reference"] = payload["reference"]
+            if payload.get("reference"):
+                request_data["reference"] = payload["reference"]
 
-        try:
-            response = self.session.post(url, json=request_data)
+            try:
+                response = self.session.post(url, json=request_data)
 
-            if not response.ok:
-                if 500 <= response.status_code < 600:
-                    raise RuntimeError(
-                        f"Server error ({response.status_code}): {response.reason}. "
-                        f"{response.text}. This may be due to temporary service issues."
+                if not response.ok:
+                    # Create appropriate LingoDevError based on status code
+                    request_details = {
+                        "method": "POST",
+                        "url": url,
+                        "status_code": response.status_code
+                    }
+                    
+                    if 500 <= response.status_code < 600:
+                        raise create_api_error_from_response(response, request_details)
+                    elif response.status_code == 400:
+                        raise LingoDevAPIError(
+                            f"Invalid request: {response.reason}",
+                            response.status_code,
+                            response.text,
+                            request_details
+                        )
+                    else:
+                        raise create_api_error_from_response(response, request_details)
+
+                json_response = response.json()
+
+                # Handle streaming errors
+                if not json_response.get("data") and json_response.get("error"):
+                    raise LingoDevAPIError(
+                        f"API streaming error: {json_response['error']}",
+                        response.status_code,
+                        json_response.get("error", ""),
+                        {"method": "POST", "url": url}
                     )
-                elif response.status_code == 400:
-                    raise ValueError(
-                        f"Invalid request ({response.status_code}): {response.reason}"
-                    )
-                else:
-                    raise RuntimeError(response.text)
 
-            json_response = response.json()
+                return json_response.get("data") or {}
 
-            # Handle streaming errors
-            if not json_response.get("data") and json_response.get("error"):
-                raise RuntimeError(json_response["error"])
+            except requests.RequestException as e:
+                # Convert requests exceptions to our custom exceptions
+                request_details = {"method": "POST", "url": url}
+                raise create_network_error_from_exception(e, request_details)
 
-            return json_response.get("data") or {}
-
-        except requests.RequestException as e:
-            raise RuntimeError(f"Request failed: {str(e)}")
+        # Use retry handler if available, otherwise execute directly
+        if self.retry_handler:
+            return self.retry_handler.execute_with_retry(_make_request)
+        else:
+            return _make_request()
 
     def _extract_payload_chunks(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
@@ -369,24 +404,33 @@ class LingoDotDevEngine:
         if not text or not text.strip():
             raise ValueError("Text cannot be empty")
 
-        url = urljoin(self.config.api_url, "/recognize")
+        def _make_request() -> str:
+            """Internal function to make the API request"""
+            url = urljoin(self.config.api_url, "/recognize")
 
-        try:
-            response = self.session.post(url, json={"text": text})
+            try:
+                response = self.session.post(url, json={"text": text})
 
-            if not response.ok:
-                if 500 <= response.status_code < 600:
-                    raise RuntimeError(
-                        f"Server error ({response.status_code}): {response.reason}. "
-                        "This may be due to temporary service issues."
-                    )
-                raise RuntimeError(f"Error recognizing locale: {response.reason}")
+                if not response.ok:
+                    request_details = {
+                        "method": "POST",
+                        "url": url,
+                        "status_code": response.status_code
+                    }
+                    raise create_api_error_from_response(response, request_details)
 
-            json_response = response.json()
-            return json_response.get("locale") or ""
+                json_response = response.json()
+                return json_response.get("locale") or ""
 
-        except requests.RequestException as e:
-            raise RuntimeError(f"Request failed: {str(e)}")
+            except requests.RequestException as e:
+                request_details = {"method": "POST", "url": url}
+                raise create_network_error_from_exception(e, request_details)
+
+        # Use retry handler if available, otherwise execute directly
+        if self.retry_handler:
+            return self.retry_handler.execute_with_retry(_make_request)
+        else:
+            return _make_request()
 
     def whoami(self) -> Optional[Dict[str, str]]:
         """
@@ -395,26 +439,40 @@ class LingoDotDevEngine:
         Returns:
             Dictionary with 'email' and 'id' keys, or None if not authenticated
         """
-        url = urljoin(self.config.api_url, "/whoami")
+        def _make_request() -> Optional[Dict[str, str]]:
+            """Internal function to make the API request"""
+            url = urljoin(self.config.api_url, "/whoami")
 
-        try:
-            response = self.session.post(url)
+            try:
+                response = self.session.post(url)
 
-            if response.ok:
-                payload = response.json()
-                if payload.get("email"):
-                    return {"email": payload["email"], "id": payload["id"]}
+                if response.ok:
+                    payload = response.json()
+                    if payload.get("email"):
+                        return {"email": payload["email"], "id": payload["id"]}
 
-            if 500 <= response.status_code < 600:
-                raise RuntimeError(
-                    f"Server error ({response.status_code}): {response.reason}. "
-                    "This may be due to temporary service issues."
-                )
+                if 500 <= response.status_code < 600:
+                    request_details = {
+                        "method": "POST",
+                        "url": url,
+                        "status_code": response.status_code
+                    }
+                    raise create_api_error_from_response(response, request_details)
 
-            return None
+                return None
 
-        except requests.RequestException as e:
-            # Return None for network errors, but re-raise server errors
-            if "Server error" in str(e):
-                raise
-            return None
+            except requests.RequestException as e:
+                # Return None for network errors, but re-raise server errors
+                if "Server error" in str(e):
+                    raise
+                return None
+
+        # Use retry handler if available, otherwise execute directly
+        if self.retry_handler:
+            try:
+                return self.retry_handler.execute_with_retry(_make_request)
+            except LingoDevError:
+                # For whoami, we want to return None on errors rather than raise
+                return None
+        else:
+            return _make_request()

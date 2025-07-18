@@ -6,52 +6,81 @@ import pytest
 from unittest.mock import Mock, patch
 
 from lingodotdev import LingoDotDevEngine
-from lingodotdev.engine import EngineConfig
+from lingodotdev.models import EnhancedEngineConfig
 
 
-class TestEngineConfig:
-    """Test the EngineConfig model"""
+class TestEnhancedEngineConfig:
+    """Test the EnhancedEngineConfig model"""
 
     def test_valid_config(self):
         """Test valid configuration"""
-        config = EngineConfig(
-            api_key="test_key",
+        config = EnhancedEngineConfig(
+            api_key="test_key_12345",
             api_url="https://api.test.com",
             batch_size=50,
             ideal_batch_item_size=500,
+            timeout=60.0,
         )
-        assert config.api_key == "test_key"
+        assert config.api_key == "test_key_12345"
         assert config.api_url == "https://api.test.com"
         assert config.batch_size == 50
         assert config.ideal_batch_item_size == 500
+        assert config.timeout == 60.0
 
     def test_default_values(self):
         """Test default configuration values"""
-        config = EngineConfig(api_key="test_key")
+        config = EnhancedEngineConfig(api_key="test_key_12345")
         assert config.api_url == "https://engine.lingo.dev"
         assert config.batch_size == 25
         assert config.ideal_batch_item_size == 250
+        assert config.timeout == 30.0
+        assert config.retry_config is not None
 
     def test_invalid_api_url(self):
         """Test invalid API URL validation"""
-        with pytest.raises(ValueError, match="API URL must be a valid HTTP/HTTPS URL"):
-            EngineConfig(api_key="test_key", api_url="invalid_url")
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            EnhancedEngineConfig(api_key="test_key_12345", api_url="invalid_url")
 
     def test_invalid_batch_size(self):
         """Test invalid batch size validation"""
-        with pytest.raises(ValueError):
-            EngineConfig(api_key="test_key", batch_size=0)
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            EnhancedEngineConfig(api_key="test_key_12345", batch_size=0)
 
-        with pytest.raises(ValueError):
-            EngineConfig(api_key="test_key", batch_size=300)
+        with pytest.raises(ValidationError):
+            EnhancedEngineConfig(api_key="test_key_12345", batch_size=300)
 
     def test_invalid_ideal_batch_item_size(self):
         """Test invalid ideal batch item size validation"""
-        with pytest.raises(ValueError):
-            EngineConfig(api_key="test_key", ideal_batch_item_size=0)
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            EnhancedEngineConfig(api_key="test_key_12345", ideal_batch_item_size=0)
 
-        with pytest.raises(ValueError):
-            EngineConfig(api_key="test_key", ideal_batch_item_size=3000)
+        with pytest.raises(ValidationError):
+            EnhancedEngineConfig(api_key="test_key_12345", ideal_batch_item_size=3000)
+
+    def test_retry_configuration(self):
+        """Test retry configuration integration"""
+        from lingodotdev.models import RetryConfiguration
+        
+        retry_config = RetryConfiguration(max_retries=5, backoff_factor=1.0)
+        config = EnhancedEngineConfig(
+            api_key="test_key_12345",
+            retry_config=retry_config
+        )
+        
+        assert config.retry_config.max_retries == 5
+        assert config.retry_config.backoff_factor == 1.0
+
+    def test_disable_retry(self):
+        """Test disabling retry functionality"""
+        config = EnhancedEngineConfig(
+            api_key="test_key_12345",
+            retry_config=None
+        )
+        
+        assert config.retry_config is None
 
 
 class TestLingoDotDevEngine:
@@ -137,7 +166,9 @@ class TestLingoDotDevEngine:
 
     @patch("lingodotdev.engine.requests.Session.post")
     def test_localize_chunk_server_error(self, mock_post):
-        """Test server error handling in chunk localization"""
+        """Test server error handling in chunk localization with retry logic"""
+        from lingodotdev.exceptions import LingoDevRetryExhaustedError
+        
         mock_response = Mock()
         mock_response.ok = False
         mock_response.status_code = 500
@@ -145,7 +176,8 @@ class TestLingoDotDevEngine:
         mock_response.text = "Server error details"
         mock_post.return_value = mock_response
 
-        with pytest.raises(RuntimeError, match="Server error"):
+        # Now expects LingoDevRetryExhaustedError after retry attempts
+        with pytest.raises(LingoDevRetryExhaustedError):
             self.engine._localize_chunk(
                 "en", "es", {"data": {"key": "value"}}, "workflow_id", False
             )
@@ -153,29 +185,43 @@ class TestLingoDotDevEngine:
     @patch("lingodotdev.engine.requests.Session.post")
     def test_localize_chunk_bad_request(self, mock_post):
         """Test bad request handling in chunk localization"""
+        from lingodotdev.exceptions import LingoDevRetryExhaustedError
+        
         mock_response = Mock()
         mock_response.ok = False
         mock_response.status_code = 400
         mock_response.reason = "Bad Request"
+        mock_response.text = "Bad Request"
         mock_post.return_value = mock_response
 
-        with pytest.raises(ValueError, match="Invalid request \\(400\\)"):
+        # 400 errors are not retryable, so should fail immediately
+        with pytest.raises(LingoDevRetryExhaustedError) as exc_info:
             self.engine._localize_chunk(
                 "en", "es", {"data": {"key": "value"}}, "workflow_id", False
             )
+        
+        # Should only have 1 attempt since 400 errors are not retryable
+        assert exc_info.value.total_attempts == 1
 
     @patch("lingodotdev.engine.requests.Session.post")
     def test_localize_chunk_streaming_error(self, mock_post):
         """Test streaming error handling in chunk localization"""
+        from lingodotdev.exceptions import LingoDevRetryExhaustedError
+        
         mock_response = Mock()
         mock_response.ok = True
+        mock_response.status_code = 200
         mock_response.json.return_value = {"error": "Streaming error occurred"}
         mock_post.return_value = mock_response
 
-        with pytest.raises(RuntimeError, match="Streaming error occurred"):
+        # Streaming errors are not retryable, so should fail immediately
+        with pytest.raises(LingoDevRetryExhaustedError) as exc_info:
             self.engine._localize_chunk(
                 "en", "es", {"data": {"key": "value"}}, "workflow_id", False
             )
+        
+        # Should only have 1 attempt since streaming errors are not retryable
+        assert exc_info.value.total_attempts == 1
 
     @patch("lingodotdev.engine.LingoDotDevEngine._localize_raw")
     def test_localize_text(self, mock_localize_raw):
@@ -272,14 +318,18 @@ class TestLingoDotDevEngine:
 
     @patch("lingodotdev.engine.requests.Session.post")
     def test_recognize_locale_server_error(self, mock_post):
-        """Test locale recognition with server error"""
+        """Test locale recognition with server error and retry logic"""
+        from lingodotdev.exceptions import LingoDevRetryExhaustedError
+        
         mock_response = Mock()
         mock_response.ok = False
         mock_response.status_code = 500
         mock_response.reason = "Internal Server Error"
+        mock_response.text = "Internal Server Error"
         mock_post.return_value = mock_response
 
-        with pytest.raises(RuntimeError, match="Server error"):
+        # Now expects LingoDevRetryExhaustedError after retry attempts
+        with pytest.raises(LingoDevRetryExhaustedError):
             self.engine.recognize_locale("Hello world")
 
     @patch("lingodotdev.engine.requests.Session.post")
@@ -312,15 +362,17 @@ class TestLingoDotDevEngine:
 
     @patch("lingodotdev.engine.requests.Session.post")
     def test_whoami_server_error(self, mock_post):
-        """Test whoami request with server error"""
+        """Test whoami request with server error - should return None after retry attempts"""
         mock_response = Mock()
         mock_response.ok = False
         mock_response.status_code = 500
         mock_response.reason = "Internal Server Error"
+        mock_response.text = "Internal Server Error"
         mock_post.return_value = mock_response
 
-        with pytest.raises(RuntimeError, match="Server error"):
-            self.engine.whoami()
+        # whoami should return None on errors after retry attempts
+        result = self.engine.whoami()
+        assert result is None
 
     @patch("lingodotdev.engine.requests.Session.post")
     def test_whoami_no_email(self, mock_post):

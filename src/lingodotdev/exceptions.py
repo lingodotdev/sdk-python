@@ -128,10 +128,16 @@ class LingoDevAPIError(LingoDevError):
                 "Consider implementing retry logic for transient failures"
             ])
         elif status_code == 400:
-            if "locale" in response_text.lower():
-                suggestions.append("Check that your locale codes are valid (e.g., 'en', 'es', 'fr')")
-            if "format" in response_text.lower():
-                suggestions.append("Verify that your request data is properly formatted")
+            # Handle case where response_text might be a Mock object
+            try:
+                response_text_str = str(response_text).lower()
+                if "locale" in response_text_str:
+                    suggestions.append("Check that your locale codes are valid (e.g., 'en', 'es', 'fr')")
+                if "format" in response_text_str:
+                    suggestions.append("Verify that your request data is properly formatted")
+            except (TypeError, AttributeError):
+                # If response_text is not a string or causes issues, skip specific suggestions
+                suggestions.append("Check your request parameters and data format")
         
         return suggestions
     
