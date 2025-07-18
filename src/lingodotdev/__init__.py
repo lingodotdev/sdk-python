@@ -30,6 +30,25 @@ from .models import (
     RetryConfiguration,
 )
 
+# Import exceptions for public API
+from .exceptions import (
+    LingoDevError,
+    LingoDevAPIError,
+    LingoDevNetworkError,
+    LingoDevRetryExhaustedError,
+    LingoDevValidationError,
+    LingoDevConfigurationError,
+    LingoDevTimeoutError,
+)
+
+# Import retry components for public API
+from .retry import (
+    RetryHandler,
+    AsyncRetryHandler,
+    with_retry,
+    with_async_retry,
+)
+
 # Main public API - maintain backward compatibility
 __all__ = [
     # Core engine class
@@ -50,4 +69,19 @@ __all__ = [
     "BatchLocalizationParams",
     "ChatMessageModel",
     "RetryConfiguration",
+    
+    # Exception classes
+    "LingoDevError",
+    "LingoDevAPIError", 
+    "LingoDevNetworkError",
+    "LingoDevRetryExhaustedError",
+    "LingoDevValidationError",
+    "LingoDevConfigurationError",
+    "LingoDevTimeoutError",
+    
+    # Retry components
+    "RetryHandler",
+    "AsyncRetryHandler",
+    "with_retry",
+    "with_async_retry",
 ]
