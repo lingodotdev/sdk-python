@@ -14,6 +14,7 @@ from nanoid import generate
 from .models import EnhancedEngineConfig, LocalizationParams
 from .types import EngineConfigDict
 from .retry import RetryHandler
+from .async_client import AsyncHTTPClient
 from .exceptions import (
     LingoDevError,
     LingoDevAPIError,
@@ -72,6 +73,30 @@ class LingoDotDevEngine:
                     kwargs['timeout'] = self.config.timeout
                 return original_request(*args, **kwargs)
             self.session.request = request_with_timeout
+        
+        # Async client will be initialized on demand
+        self._async_client: Optional[AsyncHTTPClient] = None
+
+    async def _get_async_client(self) -> AsyncHTTPClient:
+        """
+        Get or create the async HTTP client
+        
+        Returns:
+            AsyncHTTPClient instance
+        """
+        if self._async_client is None or self._async_client.is_closed:
+            self._async_client = AsyncHTTPClient(self.config)
+            await self._async_client._ensure_session()
+        
+        return self._async_client
+
+    async def close_async_client(self) -> None:
+        """
+        Close the async HTTP client and clean up resources
+        """
+        if self._async_client is not None:
+            await self._async_client.close()
+            self._async_client = None
 
     def _localize_raw(
         self,

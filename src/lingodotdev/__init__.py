@@ -49,6 +49,12 @@ from .retry import (
     with_async_retry,
 )
 
+# Import async client for public API
+from .async_client import (
+    AsyncHTTPClient,
+    create_async_client,
+)
+
 # Main public API - maintain backward compatibility
 __all__ = [
     # Core engine class
@@ -84,4 +90,8 @@ __all__ = [
     "AsyncRetryHandler",
     "with_retry",
     "with_async_retry",
+    
+    # Async HTTP client
+    "AsyncHTTPClient",
+    "create_async_client",
 ]
