@@ -1,0 +1,5 @@
+# Async dependencies for Lingo.dev Python SDK
+-r requirements.txt
+
+# Additional async-specific dependencies (if any in the future)
+# Currently all async dependencies are in the core requirements

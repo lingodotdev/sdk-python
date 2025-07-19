@@ -13,19 +13,40 @@ A powerful Python SDK for the Lingo.dev localization platform. This SDK provides
 ## Features
 
 - 🌍 **Multiple Content Types**: Localize text, objects, and chat sequences
+- ⚡ **Async/Await Support**: High-performance async methods for concurrent processing
 - 🚀 **Batch Processing**: Efficient handling of large content with automatic chunking
 - 🔄 **Progress Tracking**: Optional progress callbacks for long-running operations
 - 🎯 **Language Detection**: Automatic language recognition
 - 📊 **Fast Mode**: Optional fast processing for larger batches
-- 🛡️ **Type Safety**: Full type hints and Pydantic validation
+- 🔁 **Smart Retry Logic**: Configurable retry with exponential backoff and jitter
+- 🛡️ **Enhanced Error Handling**: Detailed error information with intelligent suggestions
+- 🔒 **Type Safety**: Full type hints and Pydantic validation
 - 🧪 **Well Tested**: Comprehensive test suite with high coverage
 - 🔧 **Easy Configuration**: Simple setup with minimal configuration required
+- 🔄 **Backward Compatible**: All existing code works without changes
 
 ## Installation
+
+### Basic Installation
 
 ```bash
 pip install lingodotdev
 ```
+
+### Installation with Optional Dependencies
+
+```bash
+# For development (includes testing, linting, type checking)
+pip install lingodotdev[dev]
+
+# For testing only
+pip install lingodotdev[test]
+
+# Explicit async support (already included in basic installation)
+pip install lingodotdev[async]
+```
+
+See [Dependencies Documentation](docs/dependencies.md) for detailed information about requirements and optional dependencies.
 
 ## Quick Start
 
@@ -67,6 +88,164 @@ print(result)
 #     'farewell': 'Au revoir',
 #     'question': 'Comment allez-vous?'
 # }
+```
+
+## Async/Await Support
+
+The SDK provides full async/await support for high-performance concurrent processing:
+
+### Basic Async Usage
+
+```python
+import asyncio
+from lingodotdev import LingoDotDevEngine
+
+async def main():
+    # Initialize the engine
+    engine = LingoDotDevEngine({
+        'api_key': 'your-api-key-here'
+    })
+    
+    # Async text localization
+    result = await engine.alocalize_text(
+        "Hello, world!",
+        {
+            'source_locale': 'en',
+            'target_locale': 'es'
+        }
+    )
+    print(result)  # "¡Hola, mundo!"
+    
+    # Don't forget to close the async client
+    await engine.close_async_client()
+
+# Run the async function
+asyncio.run(main())
+```
+
+### Concurrent Processing
+
+```python
+import asyncio
+from lingodotdev import LingoDotDevEngine
+
+async def concurrent_localization():
+    engine = LingoDotDevEngine({
+        'api_key': 'your-api-key-here'
+    })
+    
+    # Process multiple texts concurrently
+    texts = [
+        "Hello, world!",
+        "How are you today?",
+        "Welcome to our platform!"
+    ]
+    
+    # Create concurrent tasks
+    tasks = [
+        engine.alocalize_text(text, {
+            'source_locale': 'en',
+            'target_locale': 'es'
+        })
+        for text in texts
+    ]
+    
+    # Execute all tasks concurrently
+    results = await asyncio.gather(*tasks)
+    
+    for original, translated in zip(texts, results):
+        print(f"{original} -> {translated}")
+    
+    await engine.close_async_client()
+
+asyncio.run(concurrent_localization())
+```
+
+### Async Batch Processing
+
+```python
+import asyncio
+from lingodotdev import LingoDotDevEngine
+
+async def async_batch_processing():
+    engine = LingoDotDevEngine({
+        'api_key': 'your-api-key-here'
+    })
+    
+    # Batch localize to multiple languages concurrently
+    results = await engine.abatch_localize_text(
+        "Welcome to our platform",
+        {
+            'source_locale': 'en',
+            'target_locales': ['es', 'fr', 'de', 'it', 'pt']
+        }
+    )
+    
+    languages = ['Spanish', 'French', 'German', 'Italian', 'Portuguese']
+    for lang, result in zip(languages, results):
+        print(f"{lang}: {result}")
+    
+    await engine.close_async_client()
+
+asyncio.run(async_batch_processing())
+```
+
+## Enhanced Configuration
+
+### Basic Configuration
+
+```python
+from lingodotdev import LingoDotDevEngine
+
+# Simple configuration
+engine = LingoDotDevEngine({
+    'api_key': 'your-api-key-here'
+})
+```
+
+### Advanced Configuration with Retry Logic
+
+```python
+from lingodotdev import LingoDotDevEngine
+
+# Enhanced configuration with retry settings
+engine = LingoDotDevEngine({
+    'api_key': 'your-api-key-here',
+    'api_url': 'https://engine.lingo.dev',  # Custom API URL
+    'timeout': 60.0,  # Request timeout in seconds
+    'batch_size': 50,  # Items per batch
+    'ideal_batch_item_size': 500,  # Target size per batch item
+    'retry_config': {
+        'max_retries': 3,  # Maximum retry attempts
+        'backoff_factor': 2.0,  # Exponential backoff multiplier
+        'jitter': True,  # Add random jitter to prevent thundering herd
+        'retry_on_status_codes': [500, 502, 503, 504],  # HTTP status codes to retry
+        'retry_on_exceptions': ['requests.exceptions.RequestException']
+    }
+})
+```
+
+### Type-Safe Configuration
+
+```python
+from lingodotdev import LingoDotDevEngine
+from lingodotdev.models import EnhancedEngineConfig, RetryConfiguration
+
+# Using Pydantic models for type safety
+retry_config = RetryConfiguration(
+    max_retries=5,
+    backoff_factor=1.5,
+    jitter=True,
+    max_delay=60.0
+)
+
+config = EnhancedEngineConfig(
+    api_key='your-api-key-here',
+    timeout=45.0,
+    retry_config=retry_config
+)
+
+engine = LingoDotDevEngine(config)
 ```
 
 ## API Reference
@@ -220,25 +399,177 @@ else:
     print("Not authenticated")
 ```
 
-## Error Handling
+## Async API Methods
 
-The SDK raises the following exceptions:
+All synchronous methods have async counterparts with the `a` prefix:
 
-- `ValueError`: For invalid input parameters
-- `RuntimeError`: For API errors and network issues
-- `pydantic.ValidationError`: For configuration validation errors
+### `alocalize_text(text, params, progress_callback=None)`
+
+Async version of `localize_text` with concurrent processing capabilities.
+
+**Parameters:** Same as `localize_text`
+**Returns:** `str` - The localized text
 
 **Example:**
 ```python
-try:
-    result = engine.localize_text(
-        "Hello world",
-        {'target_locale': 'es'}  # Missing source_locale
+import asyncio
+
+async def main():
+    result = await engine.alocalize_text(
+        "Welcome to our application",
+        {
+            'source_locale': 'en',
+            'target_locale': 'es'
+        }
     )
-except ValueError as e:
-    print(f"Invalid parameters: {e}")
-except RuntimeError as e:
-    print(f"API error: {e}")
+    print(result)
+
+asyncio.run(main())
+```
+
+### `alocalize_object(obj, params, progress_callback=None)`
+
+Async version of `localize_object` with concurrent chunk processing.
+
+**Parameters:** Same as `localize_object`
+**Returns:** `dict` - The localized object
+
+### `abatch_localize_text(text, params)`
+
+Async version of `batch_localize_text` with concurrent target language processing.
+
+**Parameters:** Same as `batch_localize_text`
+**Returns:** `list` - List of localized strings
+
+**Example:**
+```python
+async def main():
+    results = await engine.abatch_localize_text(
+        "Welcome to our platform",
+        {
+            'source_locale': 'en',
+            'target_locales': ['es', 'fr', 'de', 'it']
+        }
+    )
+    print(results)
+
+asyncio.run(main())
+```
+
+### `alocalize_chat(chat, params, progress_callback=None)`
+
+Async version of `localize_chat`.
+
+**Parameters:** Same as `localize_chat`
+**Returns:** `list` - Localized chat messages
+
+### `arecognize_locale(text)`
+
+Async version of `recognize_locale`.
+
+**Parameters:** Same as `recognize_locale`
+**Returns:** `str` - The detected language code
+
+### `awhoami()`
+
+Async version of `whoami`.
+
+**Parameters:** None
+**Returns:** `dict` or `None` - User information
+
+### `close_async_client()`
+
+Close the async HTTP client and clean up resources.
+
+**Important:** Always call this method when you're done with async operations to properly clean up resources.
+
+**Example:**
+```python
+async def main():
+    engine = LingoDotDevEngine({'api_key': 'your-key'})
+    
+    # Perform async operations
+    result = await engine.alocalize_text("Hello", {"target_locale": "es"})
+    
+    # Clean up
+    await engine.close_async_client()
+
+asyncio.run(main())
+```
+
+## Error Handling
+
+The SDK provides enhanced error handling with detailed error information and intelligent suggestions:
+
+### Exception Hierarchy
+
+- `LingoDevError`: Base exception for all SDK errors
+- `LingoDevAPIError`: API-related errors (HTTP 4xx/5xx responses)
+- `LingoDevNetworkError`: Network connectivity issues
+- `LingoDevRetryExhaustedError`: When retry attempts are exhausted
+- `LingoDevValidationError`: Data validation errors
+- `LingoDevConfigurationError`: Configuration-related errors
+- `LingoDevTimeoutError`: Request timeout errors
+
+### Basic Error Handling
+
+```python
+from lingodotdev import LingoDotDevEngine
+from lingodotdev.exceptions import LingoDevError, LingoDevAPIError
+
+try:
+    engine = LingoDotDevEngine({'api_key': 'your-api-key'})
+    result = engine.localize_text("Hello", {'target_locale': 'es'})
+except LingoDevAPIError as e:
+    print(f"API Error: {e}")
+    print(f"Status Code: {e.status_code}")
+    print(f"Suggestions: {e.suggestions}")
+except LingoDevError as e:
+    print(f"SDK Error: {e}")
+    print(f"Error Details: {e.details}")
+```
+
+### Advanced Error Handling with Retry
+
+```python
+from lingodotdev import LingoDotDevEngine
+from lingodotdev.exceptions import LingoDevRetryExhaustedError
+
+# Configure retry behavior
+engine = LingoDotDevEngine({
+    'api_key': 'your-api-key',
+    'retry_config': {
+        'max_retries': 3,
+        'backoff_factor': 2.0,
+        'jitter': True
+    }
+})
+
+try:
+    result = engine.localize_text("Hello", {'target_locale': 'es'})
+except LingoDevRetryExhaustedError as e:
+    print(f"All retry attempts failed: {e}")
+    print(f"Total attempts: {e.total_attempts}")
+    print(f"Last error: {e.last_error}")
+```
+
+### Error Context and Debugging
+
+```python
+try:
+    result = engine.localize_text("Hello", {'target_locale': 'invalid'})
+except LingoDevError as e:
+    # All errors include timestamp and context
+    print(f"Error occurred at: {e.timestamp}")
+    print(f"Error context: {e.details}")
+    
+    # API errors include request details
+    if hasattr(e, 'request_details'):
+        print(f"Request details: {e.request_details}")
+    
+    # Some errors include helpful suggestions
+    if hasattr(e, 'suggestions'):
+        print(f"Suggestions: {e.suggestions}")
 ```
 
 ## Advanced Usage

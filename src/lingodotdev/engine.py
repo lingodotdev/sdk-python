@@ -4,37 +4,26 @@ LingoDotDevEngine implementation for Python SDK
 
 # mypy: disable-error-code=unreachable
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 from urllib.parse import urljoin
+import asyncio
 
 import requests
 from nanoid import generate
-from pydantic import BaseModel, Field, field_validator
 
-
-class EngineConfig(BaseModel):
-    """Configuration for the LingoDotDevEngine"""
-
-    api_key: str
-    api_url: str = "https://engine.lingo.dev"
-    batch_size: int = Field(default=25, ge=1, le=250)
-    ideal_batch_item_size: int = Field(default=250, ge=1, le=2500)
-
-    @field_validator("api_url")
-    @classmethod
-    def validate_api_url(cls, v: str) -> str:
-        if not v.startswith(("http://", "https://")):
-            raise ValueError("API URL must be a valid HTTP/HTTPS URL")
-        return v
-
-
-class LocalizationParams(BaseModel):
-    """Parameters for localization requests"""
-
-    source_locale: Optional[str] = None
-    target_locale: str
-    fast: Optional[bool] = None
-    reference: Optional[Dict[str, Dict[str, Any]]] = None
+# Import our enhanced models and types
+from .models import EnhancedEngineConfig, LocalizationParams
+from .types import EngineConfigDict
+from .retry import RetryHandler
+from .async_client import AsyncHTTPClient
+from .exceptions import (
+    LingoDevError,
+    LingoDevAPIError,
+    LingoDevNetworkError,
+    LingoDevConfigurationError,
+    create_api_error_from_response,
+    create_network_error_from_exception,
+)
 
 
 class LingoDotDevEngine:
@@ -44,14 +33,31 @@ class LingoDotDevEngine:
     plain text, objects, chat sequences, and HTML documents.
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Union[Dict[str, Any], EngineConfigDict]):
         """
         Create a new LingoDotDevEngine instance
 
         Args:
-            config: Configuration options for the Engine
+            config: Configuration options for the Engine (dict or EngineConfigDict)
         """
-        self.config = EngineConfig(**config)
+        # Enhanced configuration with backward compatibility
+        if isinstance(config, dict):
+            try:
+                self.config = EnhancedEngineConfig(**config)
+            except Exception as e:
+                raise LingoDevConfigurationError(
+                    f"Invalid engine configuration: {str(e)}",
+                    details={"provided_config": config}
+                )
+        else:
+            self.config = config
+        
+        # Initialize retry handler if retry is enabled
+        self.retry_handler = None
+        if self.config.retry_config:
+            self.retry_handler = RetryHandler(self.config.retry_config)
+        
+        # Initialize HTTP session with timeout support
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -59,6 +65,39 @@ class LingoDotDevEngine:
                 "Authorization": f"Bearer {self.config.api_key}",
             }
         )
+        
+        # Set timeout for all requests
+        if hasattr(self.session, 'request'):
+            original_request = self.session.request
+            def request_with_timeout(*args, **kwargs):
+                if 'timeout' not in kwargs:
+                    kwargs['timeout'] = self.config.timeout
+                return original_request(*args, **kwargs)
+            self.session.request = request_with_timeout
+        
+        # Async client will be initialized on demand
+        self._async_client: Optional[AsyncHTTPClient] = None
+
+    async def _get_async_client(self) -> AsyncHTTPClient:
+        """
+        Get or create the async HTTP client
+        
+        Returns:
+            AsyncHTTPClient instance
+        """
+        if self._async_client is None or self._async_client.is_closed:
+            self._async_client = AsyncHTTPClient(self.config)
+            await self._async_client._ensure_session()
+        
+        return self._async_client
+
+    async def close_async_client(self) -> None:
+        """
+        Close the async HTTP client and clean up resources
+        """
+        if self._async_client is not None:
+            await self._async_client.close()
+            self._async_client = None
 
     def _localize_raw(
         self,
@@ -127,43 +166,65 @@ class LingoDotDevEngine:
         Returns:
             Localized chunk
         """
-        url = urljoin(self.config.api_url, "/i18n")
+        def _make_request() -> Dict[str, str]:
+            """Internal function to make the API request"""
+            url = urljoin(self.config.api_url, "/i18n")
 
-        request_data = {
-            "params": {"workflowId": workflow_id, "fast": fast},
-            "locale": {"source": source_locale, "target": target_locale},
-            "data": payload["data"],
-        }
+            request_data = {
+                "params": {"workflowId": workflow_id, "fast": fast},
+                "locale": {"source": source_locale, "target": target_locale},
+                "data": payload["data"],
+            }
 
-        if payload.get("reference"):
-            request_data["reference"] = payload["reference"]
+            if payload.get("reference"):
+                request_data["reference"] = payload["reference"]
 
-        try:
-            response = self.session.post(url, json=request_data)
+            try:
+                response = self.session.post(url, json=request_data)
 
-            if not response.ok:
-                if 500 <= response.status_code < 600:
-                    raise RuntimeError(
-                        f"Server error ({response.status_code}): {response.reason}. "
-                        f"{response.text}. This may be due to temporary service issues."
+                if not response.ok:
+                    # Create appropriate LingoDevError based on status code
+                    request_details = {
+                        "method": "POST",
+                        "url": url,
+                        "status_code": response.status_code
+                    }
+                    
+                    if 500 <= response.status_code < 600:
+                        raise create_api_error_from_response(response, request_details)
+                    elif response.status_code == 400:
+                        raise LingoDevAPIError(
+                            f"Invalid request: {response.reason}",
+                            response.status_code,
+                            response.text,
+                            request_details
+                        )
+                    else:
+                        raise create_api_error_from_response(response, request_details)
+
+                json_response = response.json()
+
+                # Handle streaming errors
+                if not json_response.get("data") and json_response.get("error"):
+                    raise LingoDevAPIError(
+                        f"API streaming error: {json_response['error']}",
+                        response.status_code,
+                        json_response.get("error", ""),
+                        {"method": "POST", "url": url}
                     )
-                elif response.status_code == 400:
-                    raise ValueError(
-                        f"Invalid request ({response.status_code}): {response.reason}"
-                    )
-                else:
-                    raise RuntimeError(response.text)
 
-            json_response = response.json()
+                return json_response.get("data") or {}
 
-            # Handle streaming errors
-            if not json_response.get("data") and json_response.get("error"):
-                raise RuntimeError(json_response["error"])
+            except requests.RequestException as e:
+                # Convert requests exceptions to our custom exceptions
+                request_details = {"method": "POST", "url": url}
+                raise create_network_error_from_exception(e, request_details)
 
-            return json_response.get("data") or {}
-
-        except requests.RequestException as e:
-            raise RuntimeError(f"Request failed: {str(e)}")
+        # Use retry handler if available, otherwise execute directly
+        if self.retry_handler:
+            return self.retry_handler.execute_with_retry(_make_request)
+        else:
+            return _make_request()
 
     def _extract_payload_chunks(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
@@ -369,24 +430,33 @@ class LingoDotDevEngine:
         if not text or not text.strip():
             raise ValueError("Text cannot be empty")
 
-        url = urljoin(self.config.api_url, "/recognize")
+        def _make_request() -> str:
+            """Internal function to make the API request"""
+            url = urljoin(self.config.api_url, "/recognize")
 
-        try:
-            response = self.session.post(url, json={"text": text})
+            try:
+                response = self.session.post(url, json={"text": text})
 
-            if not response.ok:
-                if 500 <= response.status_code < 600:
-                    raise RuntimeError(
-                        f"Server error ({response.status_code}): {response.reason}. "
-                        "This may be due to temporary service issues."
-                    )
-                raise RuntimeError(f"Error recognizing locale: {response.reason}")
+                if not response.ok:
+                    request_details = {
+                        "method": "POST",
+                        "url": url,
+                        "status_code": response.status_code
+                    }
+                    raise create_api_error_from_response(response, request_details)
 
-            json_response = response.json()
-            return json_response.get("locale") or ""
+                json_response = response.json()
+                return json_response.get("locale") or ""
 
-        except requests.RequestException as e:
-            raise RuntimeError(f"Request failed: {str(e)}")
+            except requests.RequestException as e:
+                request_details = {"method": "POST", "url": url}
+                raise create_network_error_from_exception(e, request_details)
+
+        # Use retry handler if available, otherwise execute directly
+        if self.retry_handler:
+            return self.retry_handler.execute_with_retry(_make_request)
+        else:
+            return _make_request()
 
     def whoami(self) -> Optional[Dict[str, str]]:
         """
@@ -395,26 +465,341 @@ class LingoDotDevEngine:
         Returns:
             Dictionary with 'email' and 'id' keys, or None if not authenticated
         """
-        url = urljoin(self.config.api_url, "/whoami")
+        def _make_request() -> Optional[Dict[str, str]]:
+            """Internal function to make the API request"""
+            url = urljoin(self.config.api_url, "/whoami")
 
-        try:
-            response = self.session.post(url)
+            try:
+                response = self.session.post(url)
 
-            if response.ok:
-                payload = response.json()
-                if payload.get("email"):
-                    return {"email": payload["email"], "id": payload["id"]}
+                if response.ok:
+                    payload = response.json()
+                    if payload.get("email"):
+                        return {"email": payload["email"], "id": payload["id"]}
 
-            if 500 <= response.status_code < 600:
-                raise RuntimeError(
-                    f"Server error ({response.status_code}): {response.reason}. "
-                    "This may be due to temporary service issues."
+                if 500 <= response.status_code < 600:
+                    request_details = {
+                        "method": "POST",
+                        "url": url,
+                        "status_code": response.status_code
+                    }
+                    raise create_api_error_from_response(response, request_details)
+
+                return None
+
+            except requests.RequestException as e:
+                # Return None for network errors, but re-raise server errors
+                if "Server error" in str(e):
+                    raise
+                return None
+
+        # Use retry handler if available, otherwise execute directly
+        if self.retry_handler:
+            try:
+                return self.retry_handler.execute_with_retry(_make_request)
+            except LingoDevError:
+                # For whoami, we want to return None on errors rather than raise
+                return None
+        else:
+            return _make_request()
+
+    # Async core processing methods
+    
+    async def _alocalize_chunk(
+        self,
+        source_locale: Optional[str],
+        target_locale: str,
+        payload: Dict[str, Any],
+        workflow_id: str,
+        fast: bool,
+    ) -> Dict[str, str]:
+        """
+        Async version of _localize_chunk - localize a single chunk of content
+        
+        Args:
+            source_locale: Source locale
+            target_locale: Target locale
+            payload: Payload containing the chunk to be localized
+            workflow_id: Workflow ID for tracking
+            fast: Whether to use fast mode
+            
+        Returns:
+            Localized chunk
+        """
+        async_client = await self._get_async_client()
+        
+        request_data = {
+            "params": {"workflowId": workflow_id, "fast": fast},
+            "locale": {"source": source_locale, "target": target_locale},
+            "data": payload["data"],
+        }
+
+        if payload.get("reference"):
+            request_data["reference"] = payload["reference"]
+
+        # Make the async API request
+        json_response = await async_client.post("/i18n", request_data)
+        
+        # Handle streaming errors
+        if not json_response.get("data") and json_response.get("error"):
+            raise LingoDevAPIError(
+                f"API streaming error: {json_response['error']}",
+                500,  # Default status for streaming errors
+                json_response.get("error", ""),
+                {"method": "POST", "endpoint": "/i18n"}
+            )
+
+        return json_response.get("data") or {}
+
+    async def _alocalize_raw(
+        self,
+        payload: Dict[str, Any],
+        params: LocalizationParams,
+        progress_callback: Optional[
+            Callable[[int, Dict[str, str], Dict[str, str]], None]
+        ] = None,
+        max_concurrent_requests: int = 5,
+    ) -> Dict[str, str]:
+        """
+        Async version of _localize_raw with concurrent chunk processing
+        
+        Args:
+            payload: The content to be localized
+            params: Localization parameters
+            progress_callback: Optional callback function to report progress (0-100)
+            max_concurrent_requests: Maximum number of concurrent API requests
+            
+        Returns:
+            Localized content
+        """
+        chunked_payload = self._extract_payload_chunks(payload)
+        workflow_id = generate()
+        
+        # Create semaphore to limit concurrent requests
+        semaphore = asyncio.Semaphore(max_concurrent_requests)
+        
+        async def process_chunk_with_semaphore(i: int, chunk: Dict[str, Any]) -> tuple[int, Dict[str, str]]:
+            """Process a single chunk with semaphore control"""
+            async with semaphore:
+                processed_chunk = await self._alocalize_chunk(
+                    params.source_locale,
+                    params.target_locale,
+                    {"data": chunk, "reference": params.reference},
+                    workflow_id,
+                    params.fast or False,
+                )
+                
+                # Calculate progress and call callback if provided
+                if progress_callback:
+                    percentage_completed = round(((i + 1) / len(chunked_payload)) * 100)
+                    progress_callback(percentage_completed, chunk, processed_chunk)
+                
+                return i, processed_chunk
+        
+        # Process all chunks concurrently
+        tasks = [
+            process_chunk_with_semaphore(i, chunk)
+            for i, chunk in enumerate(chunked_payload)
+        ]
+        
+        # Wait for all tasks to complete
+        results = await asyncio.gather(*tasks)
+        
+        # Sort results by original order and combine
+        results.sort(key=lambda x: x[0])  # Sort by index
+        processed_payload_chunks = [result[1] for result in results]
+        
+        # Combine all chunks into final result
+        result = {}
+        for chunk in processed_payload_chunks:
+            result.update(chunk)
+
+        return result
+
+    # Async public API methods
+    
+    async def alocalize_text(
+        self,
+        text: str,
+        params: Dict[str, Any],
+        progress_callback: Optional[Callable[[int], None]] = None,
+    ) -> str:
+        """
+        Async version of localize_text - localize a single text string
+        
+        Args:
+            text: The text string to be localized
+            params: Localization parameters:
+                - source_locale: The source language code (e.g., 'en')
+                - target_locale: The target language code (e.g., 'es')
+                - fast: Optional boolean to enable fast mode
+            progress_callback: Optional callback function to report progress (0-100)
+            
+        Returns:
+            The localized text string
+        """
+        localization_params = LocalizationParams(**params)
+
+        def wrapped_progress_callback(
+            progress: int, source_chunk: Dict[str, str], processed_chunk: Dict[str, str]
+        ):
+            if progress_callback:
+                progress_callback(progress)
+
+        response = await self._alocalize_raw(
+            {"text": text}, localization_params, wrapped_progress_callback
+        )
+
+        return response.get("text", "")
+
+    async def alocalize_object(
+        self,
+        obj: Dict[str, Any],
+        params: Dict[str, Any],
+        progress_callback: Optional[
+            Callable[[int, Dict[str, str], Dict[str, str]], None]
+        ] = None,
+    ) -> Dict[str, Any]:
+        """
+        Async version of localize_object - localize a typical Python dictionary
+        
+        Args:
+            obj: The object to be localized (strings will be extracted and translated)
+            params: Localization parameters:
+                - source_locale: The source language code (e.g., 'en')
+                - target_locale: The target language code (e.g., 'es')
+                - fast: Optional boolean to enable fast mode
+            progress_callback: Optional callback function to report progress (0-100)
+            
+        Returns:
+            A new object with the same structure but localized string values
+        """
+        localization_params = LocalizationParams(**params)
+        return await self._alocalize_raw(obj, localization_params, progress_callback)
+
+    async def abatch_localize_text(
+        self, 
+        text: str, 
+        params: Dict[str, Any]
+    ) -> List[str]:
+        """
+        Async version of batch_localize_text - localize text to multiple target locales concurrently
+        
+        Args:
+            text: The text string to be localized
+            params: Localization parameters:
+                - source_locale: The source language code (e.g., 'en')
+                - target_locales: A list of target language codes (e.g., ['es', 'fr'])
+                - fast: Optional boolean to enable fast mode
+                
+        Returns:
+            A list of localized text strings
+        """
+        if "target_locales" not in params:
+            raise ValueError("target_locales is required")
+
+        target_locales = params["target_locales"]
+        source_locale = params.get("source_locale")
+        fast = params.get("fast", False)
+
+        # Create tasks for concurrent processing of all target locales
+        tasks = [
+            self.alocalize_text(
+                text,
+                {
+                    "source_locale": source_locale,
+                    "target_locale": target_locale,
+                    "fast": fast,
+                },
+            )
+            for target_locale in target_locales
+        ]
+
+        # Process all locales concurrently
+        responses = await asyncio.gather(*tasks)
+        return responses
+
+    async def alocalize_chat(
+        self,
+        chat: List[Dict[str, str]],
+        params: Dict[str, Any],
+        progress_callback: Optional[Callable[[int], None]] = None,
+    ) -> List[Dict[str, str]]:
+        """
+        Async version of localize_chat - localize a chat sequence while preserving speaker names
+        
+        Args:
+            chat: Array of chat messages, each with 'name' and 'text' properties
+            params: Localization parameters:
+                - source_locale: The source language code (e.g., 'en')
+                - target_locale: The target language code (e.g., 'es')
+                - fast: Optional boolean to enable fast mode
+            progress_callback: Optional callback function to report progress (0-100)
+            
+        Returns:
+            Array of localized chat messages with preserved structure
+        """
+        # Validate chat format
+        for message in chat:
+            if "name" not in message or "text" not in message:
+                raise ValueError(
+                    "Each chat message must have 'name' and 'text' properties"
                 )
 
-            return None
+        localization_params = LocalizationParams(**params)
 
-        except requests.RequestException as e:
-            # Return None for network errors, but re-raise server errors
-            if "Server error" in str(e):
-                raise
+        def wrapped_progress_callback(
+            progress: int, source_chunk: Dict[str, str], processed_chunk: Dict[str, str]
+        ):
+            if progress_callback:
+                progress_callback(progress)
+
+        localized = await self._alocalize_raw(
+            {"chat": chat}, localization_params, wrapped_progress_callback
+        )
+
+        # The API returns the localized chat in the same structure
+        chat_result = localized.get("chat")
+        if chat_result and isinstance(chat_result, list):
+            return chat_result
+
+        return []
+
+    async def arecognize_locale(self, text: str) -> str:
+        """
+        Async version of recognize_locale - detect the language of a given text
+        
+        Args:
+            text: The text to analyze
+            
+        Returns:
+            A locale code (e.g., 'en', 'es', 'fr')
+        """
+        if not text or not text.strip():
+            raise ValueError("Text cannot be empty")
+
+        async_client = await self._get_async_client()
+        
+        json_response = await async_client.post("/recognize", {"text": text})
+        return json_response.get("locale") or ""
+
+    async def awhoami(self) -> Optional[Dict[str, str]]:
+        """
+        Async version of whoami - get information about the current API key
+        
+        Returns:
+            Dictionary with 'email' and 'id' keys, or None if not authenticated
+        """
+        try:
+            async_client = await self._get_async_client()
+            
+            json_response = await async_client.post("/whoami", {})
+            
+            if json_response.get("email"):
+                return {"email": json_response["email"], "id": json_response["id"]}
+            
+            return None
+            
+        except LingoDevError:
+            # For whoami, we want to return None on errors rather than raise
             return None
