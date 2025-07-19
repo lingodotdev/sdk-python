@@ -1,0 +1,19 @@
+# Development dependencies for Lingo.dev Python SDK
+-r requirements.txt
+
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.0.0
+
+# Code quality
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.0.0
+
+# Type stubs
+types-requests>=2.25.0
+types-aiohttp>=3.8.0
+
+# Release management
+python-semantic-release>=8.0.0

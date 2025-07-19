@@ -6,6 +6,7 @@ LingoDotDevEngine implementation for Python SDK
 
 from typing import Any, Callable, Dict, List, Optional, Union
 from urllib.parse import urljoin
+import asyncio
 
 import requests
 from nanoid import generate
@@ -501,3 +502,304 @@ class LingoDotDevEngine:
                 return None
         else:
             return _make_request()
+
+    # Async core processing methods
+    
+    async def _alocalize_chunk(
+        self,
+        source_locale: Optional[str],
+        target_locale: str,
+        payload: Dict[str, Any],
+        workflow_id: str,
+        fast: bool,
+    ) -> Dict[str, str]:
+        """
+        Async version of _localize_chunk - localize a single chunk of content
+        
+        Args:
+            source_locale: Source locale
+            target_locale: Target locale
+            payload: Payload containing the chunk to be localized
+            workflow_id: Workflow ID for tracking
+            fast: Whether to use fast mode
+            
+        Returns:
+            Localized chunk
+        """
+        async_client = await self._get_async_client()
+        
+        request_data = {
+            "params": {"workflowId": workflow_id, "fast": fast},
+            "locale": {"source": source_locale, "target": target_locale},
+            "data": payload["data"],
+        }
+
+        if payload.get("reference"):
+            request_data["reference"] = payload["reference"]
+
+        # Make the async API request
+        json_response = await async_client.post("/i18n", request_data)
+        
+        # Handle streaming errors
+        if not json_response.get("data") and json_response.get("error"):
+            raise LingoDevAPIError(
+                f"API streaming error: {json_response['error']}",
+                500,  # Default status for streaming errors
+                json_response.get("error", ""),
+                {"method": "POST", "endpoint": "/i18n"}
+            )
+
+        return json_response.get("data") or {}
+
+    async def _alocalize_raw(
+        self,
+        payload: Dict[str, Any],
+        params: LocalizationParams,
+        progress_callback: Optional[
+            Callable[[int, Dict[str, str], Dict[str, str]], None]
+        ] = None,
+        max_concurrent_requests: int = 5,
+    ) -> Dict[str, str]:
+        """
+        Async version of _localize_raw with concurrent chunk processing
+        
+        Args:
+            payload: The content to be localized
+            params: Localization parameters
+            progress_callback: Optional callback function to report progress (0-100)
+            max_concurrent_requests: Maximum number of concurrent API requests
+            
+        Returns:
+            Localized content
+        """
+        chunked_payload = self._extract_payload_chunks(payload)
+        workflow_id = generate()
+        
+        # Create semaphore to limit concurrent requests
+        semaphore = asyncio.Semaphore(max_concurrent_requests)
+        
+        async def process_chunk_with_semaphore(i: int, chunk: Dict[str, Any]) -> tuple[int, Dict[str, str]]:
+            """Process a single chunk with semaphore control"""
+            async with semaphore:
+                processed_chunk = await self._alocalize_chunk(
+                    params.source_locale,
+                    params.target_locale,
+                    {"data": chunk, "reference": params.reference},
+                    workflow_id,
+                    params.fast or False,
+                )
+                
+                # Calculate progress and call callback if provided
+                if progress_callback:
+                    percentage_completed = round(((i + 1) / len(chunked_payload)) * 100)
+                    progress_callback(percentage_completed, chunk, processed_chunk)
+                
+                return i, processed_chunk
+        
+        # Process all chunks concurrently
+        tasks = [
+            process_chunk_with_semaphore(i, chunk)
+            for i, chunk in enumerate(chunked_payload)
+        ]
+        
+        # Wait for all tasks to complete
+        results = await asyncio.gather(*tasks)
+        
+        # Sort results by original order and combine
+        results.sort(key=lambda x: x[0])  # Sort by index
+        processed_payload_chunks = [result[1] for result in results]
+        
+        # Combine all chunks into final result
+        result = {}
+        for chunk in processed_payload_chunks:
+            result.update(chunk)
+
+        return result
+
+    # Async public API methods
+    
+    async def alocalize_text(
+        self,
+        text: str,
+        params: Dict[str, Any],
+        progress_callback: Optional[Callable[[int], None]] = None,
+    ) -> str:
+        """
+        Async version of localize_text - localize a single text string
+        
+        Args:
+            text: The text string to be localized
+            params: Localization parameters:
+                - source_locale: The source language code (e.g., 'en')
+                - target_locale: The target language code (e.g., 'es')
+                - fast: Optional boolean to enable fast mode
+            progress_callback: Optional callback function to report progress (0-100)
+            
+        Returns:
+            The localized text string
+        """
+        localization_params = LocalizationParams(**params)
+
+        def wrapped_progress_callback(
+            progress: int, source_chunk: Dict[str, str], processed_chunk: Dict[str, str]
+        ):
+            if progress_callback:
+                progress_callback(progress)
+
+        response = await self._alocalize_raw(
+            {"text": text}, localization_params, wrapped_progress_callback
+        )
+
+        return response.get("text", "")
+
+    async def alocalize_object(
+        self,
+        obj: Dict[str, Any],
+        params: Dict[str, Any],
+        progress_callback: Optional[
+            Callable[[int, Dict[str, str], Dict[str, str]], None]
+        ] = None,
+    ) -> Dict[str, Any]:
+        """
+        Async version of localize_object - localize a typical Python dictionary
+        
+        Args:
+            obj: The object to be localized (strings will be extracted and translated)
+            params: Localization parameters:
+                - source_locale: The source language code (e.g., 'en')
+                - target_locale: The target language code (e.g., 'es')
+                - fast: Optional boolean to enable fast mode
+            progress_callback: Optional callback function to report progress (0-100)
+            
+        Returns:
+            A new object with the same structure but localized string values
+        """
+        localization_params = LocalizationParams(**params)
+        return await self._alocalize_raw(obj, localization_params, progress_callback)
+
+    async def abatch_localize_text(
+        self, 
+        text: str, 
+        params: Dict[str, Any]
+    ) -> List[str]:
+        """
+        Async version of batch_localize_text - localize text to multiple target locales concurrently
+        
+        Args:
+            text: The text string to be localized
+            params: Localization parameters:
+                - source_locale: The source language code (e.g., 'en')
+                - target_locales: A list of target language codes (e.g., ['es', 'fr'])
+                - fast: Optional boolean to enable fast mode
+                
+        Returns:
+            A list of localized text strings
+        """
+        if "target_locales" not in params:
+            raise ValueError("target_locales is required")
+
+        target_locales = params["target_locales"]
+        source_locale = params.get("source_locale")
+        fast = params.get("fast", False)
+
+        # Create tasks for concurrent processing of all target locales
+        tasks = [
+            self.alocalize_text(
+                text,
+                {
+                    "source_locale": source_locale,
+                    "target_locale": target_locale,
+                    "fast": fast,
+                },
+            )
+            for target_locale in target_locales
+        ]
+
+        # Process all locales concurrently
+        responses = await asyncio.gather(*tasks)
+        return responses
+
+    async def alocalize_chat(
+        self,
+        chat: List[Dict[str, str]],
+        params: Dict[str, Any],
+        progress_callback: Optional[Callable[[int], None]] = None,
+    ) -> List[Dict[str, str]]:
+        """
+        Async version of localize_chat - localize a chat sequence while preserving speaker names
+        
+        Args:
+            chat: Array of chat messages, each with 'name' and 'text' properties
+            params: Localization parameters:
+                - source_locale: The source language code (e.g., 'en')
+                - target_locale: The target language code (e.g., 'es')
+                - fast: Optional boolean to enable fast mode
+            progress_callback: Optional callback function to report progress (0-100)
+            
+        Returns:
+            Array of localized chat messages with preserved structure
+        """
+        # Validate chat format
+        for message in chat:
+            if "name" not in message or "text" not in message:
+                raise ValueError(
+                    "Each chat message must have 'name' and 'text' properties"
+                )
+
+        localization_params = LocalizationParams(**params)
+
+        def wrapped_progress_callback(
+            progress: int, source_chunk: Dict[str, str], processed_chunk: Dict[str, str]
+        ):
+            if progress_callback:
+                progress_callback(progress)
+
+        localized = await self._alocalize_raw(
+            {"chat": chat}, localization_params, wrapped_progress_callback
+        )
+
+        # The API returns the localized chat in the same structure
+        chat_result = localized.get("chat")
+        if chat_result and isinstance(chat_result, list):
+            return chat_result
+
+        return []
+
+    async def arecognize_locale(self, text: str) -> str:
+        """
+        Async version of recognize_locale - detect the language of a given text
+        
+        Args:
+            text: The text to analyze
+            
+        Returns:
+            A locale code (e.g., 'en', 'es', 'fr')
+        """
+        if not text or not text.strip():
+            raise ValueError("Text cannot be empty")
+
+        async_client = await self._get_async_client()
+        
+        json_response = await async_client.post("/recognize", {"text": text})
+        return json_response.get("locale") or ""
+
+    async def awhoami(self) -> Optional[Dict[str, str]]:
+        """
+        Async version of whoami - get information about the current API key
+        
+        Returns:
+            Dictionary with 'email' and 'id' keys, or None if not authenticated
+        """
+        try:
+            async_client = await self._get_async_client()
+            
+            json_response = await async_client.post("/whoami", {})
+            
+            if json_response.get("email"):
+                return {"email": json_response["email"], "id": json_response["id"]}
+            
+            return None
+            
+        except LingoDevError:
+            # For whoami, we want to return None on errors rather than raise
+            return None
