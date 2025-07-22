@@ -74,7 +74,11 @@ class TestRealAPIIntegration:
         async with self.engine:
             result = await self.engine.batch_localize_text(
                 "Welcome to our application",
-                {"source_locale": "en", "target_locales": ["es", "fr", "de"], "fast": True},
+                {
+                    "source_locale": "en",
+                    "target_locales": ["es", "fr", "de"],
+                    "fast": True,
+                },
             )
 
             assert isinstance(result, list)
@@ -208,8 +212,11 @@ class TestRealAPIIntegration:
     async def test_concurrent_processing_performance(self):
         """Test concurrent processing performance improvement"""
         import time
-        
-        large_object = {f"key_{i}": f"Test content number {i} for performance testing" for i in range(10)}
+
+        large_object = {
+            f"key_{i}": f"Test content number {i} for performance testing"
+            for i in range(10)
+        }
 
         async with self.engine:
             # Test sequential processing
@@ -217,7 +224,7 @@ class TestRealAPIIntegration:
             await self.engine.localize_object(
                 large_object,
                 {"source_locale": "en", "target_locale": "es"},
-                concurrent=False
+                concurrent=False,
             )
             sequential_time = time.time() - start_time
 
@@ -226,7 +233,7 @@ class TestRealAPIIntegration:
             await self.engine.localize_object(
                 large_object,
                 {"source_locale": "en", "target_locale": "es"},
-                concurrent=True
+                concurrent=True,
             )
             concurrent_time = time.time() - start_time
 
@@ -238,13 +245,12 @@ class TestRealAPIIntegration:
         objects = [
             {"greeting": "Hello", "question": "How are you?"},
             {"farewell": "Goodbye", "thanks": "Thank you"},
-            {"welcome": "Welcome", "help": "Can I help you?"}
+            {"welcome": "Welcome", "help": "Can I help you?"},
         ]
 
         async with self.engine:
             results = await self.engine.batch_localize_objects(
-                objects,
-                {"source_locale": "en", "target_locale": "es"}
+                objects, {"source_locale": "en", "target_locale": "es"}
             )
 
             assert len(results) == 3
@@ -337,15 +343,15 @@ class TestMockedIntegration:
     async def test_concurrent_chunk_processing(self, mock_post):
         """Test concurrent chunk processing"""
         import asyncio
-        
+
         # Mock API response with delay to test concurrency
         async def mock_response_with_delay(*args, **kwargs):
             await asyncio.sleep(0.1)  # Small delay
-            mock_resp = type('MockResponse', (), {})()
+            mock_resp = type("MockResponse", (), {})()
             mock_resp.is_success = True
             mock_resp.json = lambda: {"data": {"key": "value"}}
             return mock_resp
-        
+
         mock_post.side_effect = mock_response_with_delay
 
         # Create a payload that will be chunked
@@ -356,7 +362,7 @@ class TestMockedIntegration:
         await self.engine.localize_object(
             large_payload,
             {"source_locale": "en", "target_locale": "es"},
-            concurrent=True
+            concurrent=True,
         )
         concurrent_time = asyncio.get_event_loop().time() - start_time
 

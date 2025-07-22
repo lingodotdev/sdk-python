@@ -134,7 +134,9 @@ class LingoDotDevEngine:
                 )
 
                 if progress_callback:
-                    progress_callback(percentage_completed, chunk, processed_payload_chunk)
+                    progress_callback(
+                        percentage_completed, chunk, processed_payload_chunk
+                    )
 
                 processed_payload_chunks.append(processed_payload_chunk)
 
@@ -280,7 +282,9 @@ class LingoDotDevEngine:
             A new object with the same structure but localized string values
         """
         localization_params = LocalizationParams(**params)
-        return await self._localize_raw(obj, localization_params, progress_callback, concurrent)
+        return await self._localize_raw(
+            obj, localization_params, progress_callback, concurrent
+        )
 
     async def localize_text(
         self,
@@ -425,7 +429,9 @@ class LingoDotDevEngine:
                         f"Server error ({response.status_code}): {response.reason_phrase}. "
                         "This may be due to temporary service issues."
                     )
-                raise RuntimeError(f"Error recognizing locale: {response.reason_phrase}")
+                raise RuntimeError(
+                    f"Error recognizing locale: {response.reason_phrase}"
+                )
 
             json_response = response.json()
             return json_response.get("locale") or ""
@@ -466,9 +472,7 @@ class LingoDotDevEngine:
             return None
 
     async def batch_localize_objects(
-        self,
-        objects: List[Dict[str, Any]],
-        params: Dict[str, Any]
+        self, objects: List[Dict[str, Any]], params: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """
         Localize multiple objects concurrently
@@ -515,15 +519,15 @@ class LingoDotDevEngine:
         Example:
             # Translate text
             result = await LingoDotDevEngine.quick_translate(
-                "Hello world", 
-                "your-api-key", 
+                "Hello world",
+                "your-api-key",
                 "es"
             )
-            
+
             # Translate object
             result = await LingoDotDevEngine.quick_translate(
                 {"greeting": "Hello", "farewell": "Goodbye"},
-                "your-api-key", 
+                "your-api-key",
                 "es"
             )
         """
@@ -573,8 +577,8 @@ class LingoDotDevEngine:
 
         Example:
             results = await LingoDotDevEngine.quick_batch_translate(
-                "Hello world", 
-                "your-api-key", 
+                "Hello world",
+                "your-api-key",
                 ["es", "fr", "de"]
             )
             # Results: ["Hola mundo", "Bonjour le monde", "Hallo Welt"]

@@ -345,10 +345,9 @@ class TestLingoDotDevEngine:
     @patch("lingodotdev.engine.LingoDotDevEngine.localize_object")
     async def test_batch_localize_objects(self, mock_localize_object):
         """Test batch object localization"""
-        mock_localize_object.side_effect = AsyncMock(side_effect=[
-            {"greeting": "hola"}, 
-            {"farewell": "adiós"}
-        ])
+        mock_localize_object.side_effect = AsyncMock(
+            side_effect=[{"greeting": "hola"}, {"farewell": "adiós"}]
+        )
 
         objects = [{"greeting": "hello"}, {"farewell": "goodbye"}]
         params = {"source_locale": "en", "target_locale": "es"}
@@ -360,21 +359,29 @@ class TestLingoDotDevEngine:
 
     async def test_concurrent_processing(self):
         """Test concurrent processing functionality"""
-        with patch("lingodotdev.engine.LingoDotDevEngine._localize_chunk") as mock_chunk:
+        with patch(
+            "lingodotdev.engine.LingoDotDevEngine._localize_chunk"
+        ) as mock_chunk:
             mock_chunk.return_value = {"key": "value"}
 
             large_payload = {f"key{i}": f"value{i}" for i in range(5)}
-            
+
             # Test concurrent mode
             await self.engine._localize_raw(
                 large_payload,
-                await asyncio.to_thread(lambda: type('MockParams', (), {
-                    'source_locale': 'en',
-                    'target_locale': 'es', 
-                    'fast': False,
-                    'reference': None
-                })()),
-                concurrent=True
+                await asyncio.to_thread(
+                    lambda: type(
+                        "MockParams",
+                        (),
+                        {
+                            "source_locale": "en",
+                            "target_locale": "es",
+                            "fast": False,
+                            "reference": None,
+                        },
+                    )()
+                ),
+                concurrent=True,
             )
 
             # Should have called _localize_chunk multiple times concurrently
