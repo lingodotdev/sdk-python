@@ -50,6 +50,8 @@ jobs:
         mypy src/lingodotdev
 
     - name: Test with pytest
+      env:
+        LINGODOTDEV_API_KEY: ${{ secrets.LINGODOTDEV_API_KEY }}
       run: |
         pytest --cov=src/lingodotdev --cov-report=xml --cov-report=term-missing
 
