@@ -72,7 +72,7 @@ class LingoDotDevEngine:
                     "Content-Type": "application/json; charset=utf-8",
                     "Authorization": f"Bearer {self.config.api_key}",
                 },
-                timeout=30.0,
+                timeout=60.0,
             )
 
     async def close(self):
