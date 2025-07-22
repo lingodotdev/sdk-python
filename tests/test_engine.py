@@ -3,7 +3,8 @@ Tests for the LingoDotDevEngine class
 """
 
 import pytest
-from unittest.mock import Mock, patch
+import asyncio
+from unittest.mock import Mock, patch, AsyncMock
 
 from lingodotdev import LingoDotDevEngine
 from lingodotdev.engine import EngineConfig
@@ -54,6 +55,7 @@ class TestEngineConfig:
             EngineConfig(api_key="test_key", ideal_batch_item_size=3000)
 
 
+@pytest.mark.asyncio
 class TestLingoDotDevEngine:
     """Test the LingoDotDevEngine class"""
 
@@ -73,8 +75,13 @@ class TestLingoDotDevEngine:
         assert self.engine.config.api_url == "https://api.test.com"
         assert self.engine.config.batch_size == 10
         assert self.engine.config.ideal_batch_item_size == 100
-        assert "Authorization" in self.engine.session.headers
-        assert self.engine.session.headers["Authorization"] == "Bearer test_api_key"
+        assert self.engine._client is None  # Client not initialized yet
+
+    async def test_async_context_manager(self):
+        """Test async context manager functionality"""
+        async with LingoDotDevEngine(self.config) as engine:
+            assert engine._client is not None
+            assert not engine._client.is_closed
 
     def test_count_words_in_record_string(self):
         """Test word counting in strings"""
@@ -120,69 +127,69 @@ class TestLingoDotDevEngine:
         chunks = self.engine._extract_payload_chunks(payload)
         assert len(chunks) == 2  # Should split into 2 chunks based on batch_size=10
 
-    @patch("lingodotdev.engine.requests.Session.post")
-    def test_localize_chunk_success(self, mock_post):
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_localize_chunk_success(self, mock_post):
         """Test successful chunk localization"""
         mock_response = Mock()
-        mock_response.ok = True
+        mock_response.is_success = True
         mock_response.json.return_value = {"data": {"key": "translated_value"}}
         mock_post.return_value = mock_response
 
-        result = self.engine._localize_chunk(
+        result = await self.engine._localize_chunk(
             "en", "es", {"data": {"key": "value"}}, "workflow_id", False
         )
 
         assert result == {"key": "translated_value"}
         mock_post.assert_called_once()
 
-    @patch("lingodotdev.engine.requests.Session.post")
-    def test_localize_chunk_server_error(self, mock_post):
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_localize_chunk_server_error(self, mock_post):
         """Test server error handling in chunk localization"""
         mock_response = Mock()
-        mock_response.ok = False
+        mock_response.is_success = False
         mock_response.status_code = 500
-        mock_response.reason = "Internal Server Error"
+        mock_response.reason_phrase = "Internal Server Error"
         mock_response.text = "Server error details"
         mock_post.return_value = mock_response
 
         with pytest.raises(RuntimeError, match="Server error"):
-            self.engine._localize_chunk(
+            await self.engine._localize_chunk(
                 "en", "es", {"data": {"key": "value"}}, "workflow_id", False
             )
 
-    @patch("lingodotdev.engine.requests.Session.post")
-    def test_localize_chunk_bad_request(self, mock_post):
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_localize_chunk_bad_request(self, mock_post):
         """Test bad request handling in chunk localization"""
         mock_response = Mock()
-        mock_response.ok = False
+        mock_response.is_success = False
         mock_response.status_code = 400
-        mock_response.reason = "Bad Request"
+        mock_response.reason_phrase = "Bad Request"
         mock_post.return_value = mock_response
 
         with pytest.raises(ValueError, match="Invalid request \\(400\\)"):
-            self.engine._localize_chunk(
+            await self.engine._localize_chunk(
                 "en", "es", {"data": {"key": "value"}}, "workflow_id", False
             )
 
-    @patch("lingodotdev.engine.requests.Session.post")
-    def test_localize_chunk_streaming_error(self, mock_post):
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_localize_chunk_streaming_error(self, mock_post):
         """Test streaming error handling in chunk localization"""
         mock_response = Mock()
-        mock_response.ok = True
+        mock_response.is_success = True
         mock_response.json.return_value = {"error": "Streaming error occurred"}
         mock_post.return_value = mock_response
 
         with pytest.raises(RuntimeError, match="Streaming error occurred"):
-            self.engine._localize_chunk(
+            await self.engine._localize_chunk(
                 "en", "es", {"data": {"key": "value"}}, "workflow_id", False
             )
 
     @patch("lingodotdev.engine.LingoDotDevEngine._localize_raw")
-    def test_localize_text(self, mock_localize_raw):
+    async def test_localize_text(self, mock_localize_raw):
         """Test text localization"""
         mock_localize_raw.return_value = {"text": "translated_text"}
 
-        result = self.engine.localize_text(
+        result = await self.engine.localize_text(
             "hello world", {"source_locale": "en", "target_locale": "es"}
         )
 
@@ -190,11 +197,11 @@ class TestLingoDotDevEngine:
         mock_localize_raw.assert_called_once()
 
     @patch("lingodotdev.engine.LingoDotDevEngine._localize_raw")
-    def test_localize_object(self, mock_localize_raw):
+    async def test_localize_object(self, mock_localize_raw):
         """Test object localization"""
         mock_localize_raw.return_value = {"greeting": "hola", "farewell": "adiós"}
 
-        result = self.engine.localize_object(
+        result = await self.engine.localize_object(
             {"greeting": "hello", "farewell": "goodbye"},
             {"source_locale": "en", "target_locale": "es"},
         )
@@ -203,11 +210,11 @@ class TestLingoDotDevEngine:
         mock_localize_raw.assert_called_once()
 
     @patch("lingodotdev.engine.LingoDotDevEngine.localize_text")
-    def test_batch_localize_text(self, mock_localize_text):
+    async def test_batch_localize_text(self, mock_localize_text):
         """Test batch text localization"""
-        mock_localize_text.side_effect = ["hola", "bonjour"]
+        mock_localize_text.side_effect = AsyncMock(side_effect=["hola", "bonjour"])
 
-        result = self.engine.batch_localize_text(
+        result = await self.engine.batch_localize_text(
             "hello",
             {"source_locale": "en", "target_locales": ["es", "fr"], "fast": True},
         )
@@ -215,13 +222,13 @@ class TestLingoDotDevEngine:
         assert result == ["hola", "bonjour"]
         assert mock_localize_text.call_count == 2
 
-    def test_batch_localize_text_missing_target_locales(self):
+    async def test_batch_localize_text_missing_target_locales(self):
         """Test batch text localization with missing target_locales"""
         with pytest.raises(ValueError, match="target_locales is required"):
-            self.engine.batch_localize_text("hello", {"source_locale": "en"})
+            await self.engine.batch_localize_text("hello", {"source_locale": "en"})
 
     @patch("lingodotdev.engine.LingoDotDevEngine._localize_raw")
-    def test_localize_chat(self, mock_localize_raw):
+    async def test_localize_chat(self, mock_localize_raw):
         """Test chat localization"""
         mock_localize_raw.return_value = {
             "chat": [
@@ -232,7 +239,7 @@ class TestLingoDotDevEngine:
 
         chat = [{"name": "Alice", "text": "hello"}, {"name": "Bob", "text": "goodbye"}]
 
-        result = self.engine.localize_chat(
+        result = await self.engine.localize_chat(
             chat, {"source_locale": "en", "target_locale": "es"}
         )
 
@@ -241,101 +248,148 @@ class TestLingoDotDevEngine:
         assert result == expected
         mock_localize_raw.assert_called_once()
 
-    def test_localize_chat_invalid_format(self):
+    async def test_localize_chat_invalid_format(self):
         """Test chat localization with invalid message format"""
         invalid_chat = [{"name": "Alice"}]  # Missing 'text' key
 
         with pytest.raises(
             ValueError, match="Each chat message must have 'name' and 'text' properties"
         ):
-            self.engine.localize_chat(
+            await self.engine.localize_chat(
                 invalid_chat, {"source_locale": "en", "target_locale": "es"}
             )
 
-    @patch("lingodotdev.engine.requests.Session.post")
-    def test_recognize_locale_success(self, mock_post):
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_recognize_locale_success(self, mock_post):
         """Test successful locale recognition"""
         mock_response = Mock()
-        mock_response.ok = True
+        mock_response.is_success = True
         mock_response.json.return_value = {"locale": "es"}
         mock_post.return_value = mock_response
 
-        result = self.engine.recognize_locale("Hola mundo")
+        result = await self.engine.recognize_locale("Hola mundo")
 
         assert result == "es"
         mock_post.assert_called_once()
 
-    def test_recognize_locale_empty_text(self):
+    async def test_recognize_locale_empty_text(self):
         """Test locale recognition with empty text"""
         with pytest.raises(ValueError, match="Text cannot be empty"):
-            self.engine.recognize_locale("   ")
+            await self.engine.recognize_locale("   ")
 
-    @patch("lingodotdev.engine.requests.Session.post")
-    def test_recognize_locale_server_error(self, mock_post):
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_recognize_locale_server_error(self, mock_post):
         """Test locale recognition with server error"""
         mock_response = Mock()
-        mock_response.ok = False
+        mock_response.is_success = False
         mock_response.status_code = 500
-        mock_response.reason = "Internal Server Error"
+        mock_response.reason_phrase = "Internal Server Error"
         mock_post.return_value = mock_response
 
         with pytest.raises(RuntimeError, match="Server error"):
-            self.engine.recognize_locale("Hello world")
+            await self.engine.recognize_locale("Hello world")
 
-    @patch("lingodotdev.engine.requests.Session.post")
-    def test_whoami_success(self, mock_post):
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_whoami_success(self, mock_post):
         """Test successful whoami request"""
         mock_response = Mock()
-        mock_response.ok = True
+        mock_response.is_success = True
         mock_response.json.return_value = {
             "email": "test@example.com",
             "id": "user_123",
         }
         mock_post.return_value = mock_response
 
-        result = self.engine.whoami()
+        result = await self.engine.whoami()
 
         assert result == {"email": "test@example.com", "id": "user_123"}
         mock_post.assert_called_once()
 
-    @patch("lingodotdev.engine.requests.Session.post")
-    def test_whoami_unauthenticated(self, mock_post):
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_whoami_unauthenticated(self, mock_post):
         """Test whoami request when unauthenticated"""
         mock_response = Mock()
-        mock_response.ok = False
+        mock_response.is_success = False
         mock_response.status_code = 401
         mock_post.return_value = mock_response
 
-        result = self.engine.whoami()
+        result = await self.engine.whoami()
 
         assert result is None
 
-    @patch("lingodotdev.engine.requests.Session.post")
-    def test_whoami_server_error(self, mock_post):
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_whoami_server_error(self, mock_post):
         """Test whoami request with server error"""
         mock_response = Mock()
-        mock_response.ok = False
+        mock_response.is_success = False
         mock_response.status_code = 500
-        mock_response.reason = "Internal Server Error"
+        mock_response.reason_phrase = "Internal Server Error"
         mock_post.return_value = mock_response
 
         with pytest.raises(RuntimeError, match="Server error"):
-            self.engine.whoami()
+            await self.engine.whoami()
 
-    @patch("lingodotdev.engine.requests.Session.post")
-    def test_whoami_no_email(self, mock_post):
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_whoami_no_email(self, mock_post):
         """Test whoami request with no email in response"""
         mock_response = Mock()
-        mock_response.ok = True
+        mock_response.is_success = True
         mock_response.status_code = 200
         mock_response.json.return_value = {}
         mock_post.return_value = mock_response
 
-        result = self.engine.whoami()
+        result = await self.engine.whoami()
 
         assert result is None
 
+    @patch("lingodotdev.engine.LingoDotDevEngine.localize_object")
+    async def test_batch_localize_objects(self, mock_localize_object):
+        """Test batch object localization"""
+        mock_localize_object.side_effect = AsyncMock(
+            side_effect=[{"greeting": "hola"}, {"farewell": "adiós"}]
+        )
 
+        objects = [{"greeting": "hello"}, {"farewell": "goodbye"}]
+        params = {"source_locale": "en", "target_locale": "es"}
+
+        result = await self.engine.batch_localize_objects(objects, params)
+
+        assert result == [{"greeting": "hola"}, {"farewell": "adiós"}]
+        assert mock_localize_object.call_count == 2
+
+    async def test_concurrent_processing(self):
+        """Test concurrent processing functionality"""
+        with patch(
+            "lingodotdev.engine.LingoDotDevEngine._localize_chunk"
+        ) as mock_chunk:
+            mock_chunk.return_value = {"key": "value"}
+
+            large_payload = {f"key{i}": f"value{i}" for i in range(5)}
+
+            # Create mock params object (Python 3.8 compatible)
+            mock_params = type(
+                "MockParams",
+                (),
+                {
+                    "source_locale": "en",
+                    "target_locale": "es",
+                    "fast": False,
+                    "reference": None,
+                },
+            )()
+
+            # Test concurrent mode
+            await self.engine._localize_raw(
+                large_payload,
+                mock_params,
+                concurrent=True,
+            )
+
+            # Should have called _localize_chunk multiple times concurrently
+            assert mock_chunk.call_count > 0
+
+
+@pytest.mark.asyncio
 class TestIntegration:
     """Integration tests with mocked HTTP responses"""
 
@@ -344,19 +398,19 @@ class TestIntegration:
         self.config = {"api_key": "test_api_key", "api_url": "https://api.test.com"}
         self.engine = LingoDotDevEngine(self.config)
 
-    @patch("lingodotdev.engine.requests.Session.post")
-    def test_full_localization_workflow(self, mock_post):
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_full_localization_workflow(self, mock_post):
         """Test full localization workflow"""
         # Mock the API response
         mock_response = Mock()
-        mock_response.ok = True
+        mock_response.is_success = True
         mock_response.json.return_value = {
             "data": {"greeting": "hola", "farewell": "adiós"}
         }
         mock_post.return_value = mock_response
 
         # Test object localization
-        result = self.engine.localize_object(
+        result = await self.engine.localize_object(
             {"greeting": "hello", "farewell": "goodbye"},
             {"source_locale": "en", "target_locale": "es", "fast": True},
         )

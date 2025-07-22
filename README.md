@@ -1,391 +1,235 @@
 # Lingo.dev Python SDK
 
-> 💬 **[Join our Discord community](https://lingo.dev/go/discord)** for support, discussions, and updates!
+A powerful async-first localization engine that supports various content types including plain text, objects, chat sequences, and HTML documents.
 
-[![PyPI version](https://badge.fury.io/py/lingodotdev.svg)](https://badge.fury.io/py/lingodotdev)
-[![Python support](https://img.shields.io/pypi/pyversions/lingodotdev)](https://pypi.org/project/lingodotdev/)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Tests](https://github.com/lingodotdev/sdk-python/workflows/Pull%20Request/badge.svg)](https://github.com/lingodotdev/sdk-python/actions)
-[![Coverage](https://codecov.io/gh/lingodotdev/sdk-python/branch/main/graph/badge.svg)](https://codecov.io/gh/lingodotdev/sdk-python)
+## ✨ Key Features
 
-A powerful Python SDK for the Lingo.dev localization platform. This SDK provides easy-to-use methods for localizing various content types including plain text, objects, and chat sequences. 
+- 🚀 **Async-first design** for high-performance concurrent translations
+- 🔀 **Concurrent processing** for dramatically faster bulk translations
+- 🎯 **Multiple content types**: text, objects, chat messages, and more
+- 🌐 **Auto-detection** of source languages
+- ⚡ **Fast mode** for quick translations
+- 🔧 **Flexible configuration** with progress callbacks
+- 📦 **Context manager** support for proper resource management
 
-## Features
+## 🚀 Performance Benefits
 
-- 🌍 **Multiple Content Types**: Localize text, objects, and chat sequences
-- 🚀 **Batch Processing**: Efficient handling of large content with automatic chunking
-- 🔄 **Progress Tracking**: Optional progress callbacks for long-running operations
-- 🎯 **Language Detection**: Automatic language recognition
-- 📊 **Fast Mode**: Optional fast processing for larger batches
-- 🛡️ **Type Safety**: Full type hints and Pydantic validation
-- 🧪 **Well Tested**: Comprehensive test suite with high coverage
-- 🔧 **Easy Configuration**: Simple setup with minimal configuration required
+The async implementation provides significant performance improvements:
+- **Concurrent chunk processing** for large payloads
+- **Batch operations** for multiple translations
+- **Parallel API requests** instead of sequential ones
+- **Better resource management** with httpx
 
-## Installation
+## 📦 Installation
 
 ```bash
 pip install lingodotdev
 ```
 
-## Quick Start
+## 🎯 Quick Start
+
+### Simple Translation
 
 ```python
+import asyncio
 from lingodotdev import LingoDotDevEngine
 
-# Initialize the engine
-engine = LingoDotDevEngine({
-    'api_key': 'your-api-key-here'
-})
-
-# Localize a simple text
-result = engine.localize_text(
-    "Hello, world!",
-    {
-        'source_locale': 'en',
-        'target_locale': 'es'
-    }
-)
-print(result)  # "¡Hola, mundo!"
-
-# Localize an object
-data = {
-    'greeting': 'Hello',
-    'farewell': 'Goodbye',
-    'question': 'How are you?'
-}
-
-result = engine.localize_object(
-    data,
-    {
-        'source_locale': 'en',
-        'target_locale': 'fr'
-    }
-)
-print(result)
-# {
-#     'greeting': 'Bonjour',
-#     'farewell': 'Au revoir',
-#     'question': 'Comment allez-vous?'
-# }
-```
-
-## API Reference
-
-### LingoDotDevEngine
-
-#### Constructor
-
-```python
-engine = LingoDotDevEngine(config)
-```
-
-**Parameters:**
-- `config` (dict): Configuration dictionary with the following options:
-  - `api_key` (str, required): Your Lingo.dev API key
-
-#### Methods
-
-### `localize_text(text, params, progress_callback=None)`
-
-Localize a single text string.
-
-**Parameters:**
-- `text` (str): The text to localize
-- `params` (dict): Localization parameters
-  - `source_locale` (str): Source language code (e.g., 'en')
-  - `target_locale` (str): Target language code (e.g., 'es')
-- `progress_callback` (callable): Progress callback function
-
-**Returns:** `str` - The localized text
-
-**Example:**
-```python
-result = engine.localize_text(
-    "Welcome to our application",
-    {
-        'source_locale': 'en',
-        'target_locale': 'es'
-    }
-)
-```
-
-### `localize_object(obj, params, progress_callback=None)`
-
-Localize a Python dictionary with string values.
-
-**Parameters:**
-- `obj` (dict): The object to localize
-- `params` (dict): Localization parameters (same as `localize_text`)
-- `progress_callback` (callable): Progress callback function
-
-**Returns:** `dict` - The localized object with the same structure
-
-**Example:**
-```python
-def progress_callback(progress, source_chunk, processed_chunk):
-    print(f"Progress: {progress}%")
-
-result = engine.localize_object(
-    {
-        'title': 'My App',
-        'description': 'A great application',
-        'button_text': 'Click me'
-    },
-    {
-        'source_locale': 'en',
-        'target_locale': 'de'
-    },
-    progress_callback=progress_callback
-)
-```
-
-### `batch_localize_text(text, params)`
-
-Localize a text string to multiple target languages.
-
-**Parameters:**
-- `text` (str): The text to localize
-- `params` (dict): Batch localization parameters
-  - `source_locale` (str): Source language code
-  - `target_locales` (list): List of target language codes
-
-**Returns:** `list` - List of localized strings in the same order as target_locales
-
-**Example:**
-```python
-results = engine.batch_localize_text(
-    "Welcome to our platform",
-    {
-        'source_locale': 'en',
-        'target_locales': ['es', 'fr', 'de', 'it']
-    }
-)
-```
-
-### `localize_chat(chat, params, progress_callback=None)`
-
-Localize a chat conversation while preserving speaker names.
-
-**Parameters:**
-- `chat` (list): List of chat messages with `name` and `text` keys
-- `params` (dict): Localization parameters (same as `localize_text`)
-- `progress_callback` (callable, optional): Progress callback function
-
-**Returns:** `list` - Localized chat messages with preserved structure
-
-**Example:**
-```python
-chat = [
-    {'name': 'Alice', 'text': 'Hello everyone!'},
-    {'name': 'Bob', 'text': 'How are you doing?'},
-    {'name': 'Charlie', 'text': 'Great, thanks for asking!'}
-]
-
-result = engine.localize_chat(
-    chat,
-    {
-        'source_locale': 'en',
-        'target_locale': 'es'
-    }
-)
-```
-
-### `recognize_locale(text)`
-
-Detect the language of a given text.
-
-**Parameters:**
-- `text` (str): The text to analyze
-
-**Returns:** `str` - The detected language code (e.g., 'en', 'es', 'fr')
-
-**Example:**
-```python
-locale = engine.recognize_locale("Bonjour, comment allez-vous?")
-print(locale)  # 'fr'
-```
-
-### `whoami()`
-
-Get information about the current API key.
-
-**Returns:** `dict` or `None` - User information with 'email' and 'id' keys, or None if not authenticated
-
-**Example:**
-```python
-user_info = engine.whoami()
-if user_info:
-    print(f"Authenticated as: {user_info['email']}")
-else:
-    print("Not authenticated")
-```
-
-## Error Handling
-
-The SDK raises the following exceptions:
-
-- `ValueError`: For invalid input parameters
-- `RuntimeError`: For API errors and network issues
-- `pydantic.ValidationError`: For configuration validation errors
-
-**Example:**
-```python
-try:
-    result = engine.localize_text(
-        "Hello world",
-        {'target_locale': 'es'}  # Missing source_locale
+async def main():
+    # Quick one-off translation (handles context management automatically)
+    result = await LingoDotDevEngine.quick_translate(
+        "Hello, world!",
+        api_key="your-api-key",
+        target_locale="es"
     )
-except ValueError as e:
-    print(f"Invalid parameters: {e}")
-except RuntimeError as e:
-    print(f"API error: {e}")
+    print(result)  # "¡Hola, mundo!"
+
+asyncio.run(main())
 ```
 
-## Advanced Usage
-
-### Using Reference Translations
-
-You can provide reference translations to improve consistency:
+### Context Manager (Recommended for Multiple Operations)
 
 ```python
-reference = {
-    'es': {
-        'greeting': 'Hola',
-        'app_name': 'Mi Aplicación'
-    },
-    'fr': {
-        'greeting': 'Bonjour',
-        'app_name': 'Mon Application'
+import asyncio
+from lingodotdev import LingoDotDevEngine
+
+async def main():
+    config = {
+        "api_key": "your-api-key",
+        "api_url": "https://engine.lingo.dev"  # Optional, defaults to this
     }
+    
+    async with LingoDotDevEngine(config) as engine:
+        # Translate text
+        text_result = await engine.localize_text(
+            "Hello, world!",
+            {"target_locale": "es"}
+        )
+        
+        # Translate object with concurrent processing
+        obj_result = await engine.localize_object(
+            {
+                "greeting": "Hello",
+                "farewell": "Goodbye",
+                "question": "How are you?"
+            },
+            {"target_locale": "es"},
+            concurrent=True  # Process chunks concurrently for speed
+        )
+
+asyncio.run(main())
+```
+
+## 🔥 Advanced Usage
+
+### Batch Processing (Multiple Target Languages)
+
+```python
+async def batch_example():
+    # Translate to multiple languages at once
+    results = await LingoDotDevEngine.quick_batch_translate(
+        "Welcome to our application",
+        api_key="your-api-key",
+        target_locales=["es", "fr", "de", "it"]
+    )
+    # Results: ["Bienvenido...", "Bienvenue...", "Willkommen...", "Benvenuto..."]
+```
+
+### Large Object Processing with Progress
+
+```python
+async def progress_example():
+    def progress_callback(progress, source_chunk, processed_chunk):
+        print(f"Progress: {progress}% - Processed {len(processed_chunk)} items")
+
+    large_content = {f"item_{i}": f"Content {i}" for i in range(1000)}
+    
+    async with LingoDotDevEngine({"api_key": "your-api-key"}) as engine:
+        result = await engine.localize_object(
+            large_content,
+            {"target_locale": "es"},
+            progress_callback=progress_callback,
+            concurrent=True  # Much faster for large objects
+        )
+```
+
+### Chat Translation
+
+```python
+async def chat_example():
+    chat_messages = [
+        {"name": "Alice", "text": "Hello everyone!"},
+        {"name": "Bob", "text": "How is everyone doing?"},
+        {"name": "Charlie", "text": "Great to see you all!"}
+    ]
+    
+    async with LingoDotDevEngine({"api_key": "your-api-key"}) as engine:
+        translated_chat = await engine.localize_chat(
+            chat_messages,
+            {"source_locale": "en", "target_locale": "es"}
+        )
+        # Names preserved, text translated
+```
+
+### Multiple Objects Concurrently
+
+```python
+async def concurrent_objects_example():
+    objects = [
+        {"title": "Welcome", "description": "Please sign in"},
+        {"error": "Invalid input", "help": "Check your email"},
+        {"success": "Account created", "next": "Continue to dashboard"}
+    ]
+    
+    async with LingoDotDevEngine({"api_key": "your-api-key"}) as engine:
+        results = await engine.batch_localize_objects(
+            objects,
+            {"target_locale": "fr"}
+        )
+        # All objects translated concurrently
+```
+
+### Language Detection
+
+```python
+async def detection_example():
+    async with LingoDotDevEngine({"api_key": "your-api-key"}) as engine:
+        detected = await engine.recognize_locale("Bonjour le monde")
+        print(detected)  # "fr"
+```
+
+## ⚙️ Configuration Options
+
+```python
+config = {
+    "api_key": "your-api-key",              # Required: Your API key
+    "api_url": "https://engine.lingo.dev",  # Optional: API endpoint
+    "batch_size": 25,                       # Optional: Items per batch (1-250)
+    "ideal_batch_item_size": 250            # Optional: Target words per batch (1-2500)
 }
-
-result = engine.localize_object(
-    {
-        'greeting': 'Hello',
-        'app_name': 'My App',
-        'welcome_message': 'Welcome to My App'
-    },
-    {
-        'source_locale': 'en',
-        'target_locale': 'es',
-        'reference': reference
-    }
-)
 ```
 
-### Progress Tracking
+## 🎛️ Method Parameters
 
-For long-running operations, you can track progress:
+### Translation Parameters
+- **source_locale**: Source language code (auto-detected if None)
+- **target_locale**: Target language code (required)
+- **fast**: Enable fast mode for quicker translations
+- **reference**: Reference translations for context
+- **concurrent**: Process chunks concurrently (faster, but no progress callbacks)
+
+### Performance Options
+- **concurrent=True**: Enables parallel processing of chunks
+- **progress_callback**: Function to track progress (disabled with concurrent=True)
+
+## 🔧 Error Handling
 
 ```python
-def progress_callback(progress, source_chunk, processed_chunk):
-    print(f"Progress: {progress}%")
-    print(f"Processing: {len(source_chunk)} items")
-    print(f"Completed: {len(processed_chunk)} items")
-
-# Large dataset that will be processed in chunks
-large_data = {f"key_{i}": f"Text content {i}" for i in range(1000)}
-
-result = engine.localize_object(
-    large_data,
-    {
-        'source_locale': 'en',
-        'target_locale': 'es'
-    },
-    progress_callback=progress_callback
-)
+async def error_handling_example():
+    try:
+        async with LingoDotDevEngine({"api_key": "invalid-key"}) as engine:
+            result = await engine.localize_text("Hello", {"target_locale": "es"})
+    except ValueError as e:
+        print(f"Invalid request: {e}")
+    except RuntimeError as e:
+        print(f"API error: {e}")
 ```
 
+## 🚀 Performance Tips
 
-## Development
+1. **Use `concurrent=True`** for large objects or multiple chunks
+2. **Use `batch_localize_objects()`** for multiple objects
+3. **Use context managers** for multiple operations
+4. **Use `quick_translate()`** for one-off translations
+5. **Adjust `batch_size`** based on your content structure
 
-### Setup
+## 🤝 Migration from Sync Version
 
-```bash
-git clone https://github.com/lingodotdev/sdk-python.git
-cd sdk-python
-pip install -e ".[dev]"
-```
+The async version is a drop-in replacement with these changes:
+- Add `async`/`await` to all method calls
+- Use `async with` for context managers
+- All methods now return awaitable coroutines
 
-### Running Tests
+## 📚 API Reference
 
-```bash
-# Run all tests
-pytest
+### Core Methods
+- `localize_text(text, params)` - Translate text strings
+- `localize_object(obj, params)` - Translate dictionary objects
+- `localize_chat(chat, params)` - Translate chat messages
+- `batch_localize_text(text, params)` - Translate to multiple languages
+- `batch_localize_objects(objects, params)` - Translate multiple objects
+- `recognize_locale(text)` - Detect language
+- `whoami()` - Get API account info
 
-# Run with coverage
-pytest --cov=src/lingo_dev_sdk --cov-report=html
+### Convenience Methods
+- `quick_translate(content, api_key, target_locale, ...)` - One-off translation
+- `quick_batch_translate(content, api_key, target_locales, ...)` - Batch translation
 
-# Run only unit tests
-pytest tests/test_engine.py
+## 📄 License
 
-# Run integration tests (requires API key)
-export LINGO_DEV_API_KEY=your-api-key
-pytest tests/test_integration.py
-```
+Apache-2.0 License
 
-### Code Quality
+## 🤖 Support
 
-```bash
-# Format code
-black .
-
-# Lint code
-flake8 .
-
-# Type checking
-mypy src/lingo_dev_sdk
-```
-
-## License
-
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes and add tests
-4. Commit your changes using [Conventional Commits](https://www.conventionalcommits.org/):
-   - `feat: add new feature`
-   - `fix: resolve bug`
-   - `docs: update documentation`
-   - `style: format code`
-   - `refactor: refactor code`
-   - `test: add tests`
-   - `chore: update dependencies`
-5. Push to the branch (`git push origin feature/amazing-feature`)
-6. Open a Pull Request
-
-### Release Process
-
-This project uses automated semantic releases:
-
-- **Pull Requests**: Automatically run tests and build checks
-- **Main Branch**: Automatically analyzes commit messages, bumps version, updates changelog, and publishes to PyPI
-- **Commit Messages**: Must follow [Conventional Commits](https://www.conventionalcommits.org/) format
-  - `feat:` triggers a minor version bump (0.1.0 → 0.2.0)
-  - `fix:` triggers a patch version bump (0.1.0 → 0.1.1)
-  - `BREAKING CHANGE:` triggers a major version bump (0.1.0 → 1.0.0)
-
-### Development Workflow
-
-1. Create a feature branch
-2. Make changes with proper commit messages
-3. Open a PR (triggers CI/CD)
-4. Merge to main (triggers release if applicable)
-5. Automated release to PyPI
-
-## Support
-
-- 📧 Email: [hi@lingo.dev](mailto:hi@lingo.dev)
-- 🐛 Issues: [GitHub Issues](https://github.com/lingodotdev/sdk-python/issues)
-- 📖 Documentation: [https://lingo.dev/sdk](https://lingo.dev/sdk)
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for a detailed history of changes.
-
----
-
-> 💬 **[Join our Discord community](https://lingo.dev/go/discord)** for support, discussions, and updates!
+- 📚 [Documentation](https://lingo.dev/docs)
+- 🐛 [Issues](https://github.com/lingodotdev/sdk-python/issues)
+- 💬 [Community](https://lingo.dev/discord)
