@@ -366,21 +366,22 @@ class TestLingoDotDevEngine:
 
             large_payload = {f"key{i}": f"value{i}" for i in range(5)}
 
+            # Create mock params object (Python 3.8 compatible)
+            mock_params = type(
+                "MockParams",
+                (),
+                {
+                    "source_locale": "en",
+                    "target_locale": "es",
+                    "fast": False,
+                    "reference": None,
+                },
+            )()
+
             # Test concurrent mode
             await self.engine._localize_raw(
                 large_payload,
-                await asyncio.to_thread(
-                    lambda: type(
-                        "MockParams",
-                        (),
-                        {
-                            "source_locale": "en",
-                            "target_locale": "es",
-                            "fast": False,
-                            "reference": None,
-                        },
-                    )()
-                ),
+                mock_params,
                 concurrent=True,
             )
 

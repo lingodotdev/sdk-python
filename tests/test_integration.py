@@ -30,7 +30,7 @@ class TestRealAPIIntegration:
         self.engine = LingoDotDevEngine(
             {
                 "api_key": api_key,
-                "api_url": os.getenv("LINGO_DEV_API_URL", "https://engine.lingo.dev"),
+                "api_url": os.getenv("LINGODOTDEV_API_URL", "https://engine.lingo.dev"),
             }
         )
 
