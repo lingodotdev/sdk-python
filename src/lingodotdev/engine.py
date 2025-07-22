@@ -168,6 +168,7 @@ class LingoDotDevEngine:
             Localized chunk
         """
         await self._ensure_client()
+        assert self._client is not None  # Type guard for mypy
         url = urljoin(self.config.api_url, "/i18n")
 
         request_data = {
@@ -418,6 +419,7 @@ class LingoDotDevEngine:
             raise ValueError("Text cannot be empty")
 
         await self._ensure_client()
+        assert self._client is not None  # Type guard for mypy
         url = urljoin(self.config.api_url, "/recognize")
 
         try:
@@ -447,6 +449,7 @@ class LingoDotDevEngine:
             Dictionary with 'email' and 'id' keys, or None if not authenticated
         """
         await self._ensure_client()
+        assert self._client is not None  # Type guard for mypy
         url = urljoin(self.config.api_url, "/whoami")
 
         try:
@@ -589,19 +592,22 @@ class LingoDotDevEngine:
         }
 
         async with cls(config) as engine:
-            params = {
-                "source_locale": source_locale,
-                "fast": fast,
-            }
-
             if isinstance(content, str):
-                params["target_locales"] = target_locales
-                return await engine.batch_localize_text(content, params)
+                batch_params = {
+                    "source_locale": source_locale,
+                    "target_locales": target_locales,
+                    "fast": fast,
+                }
+                return await engine.batch_localize_text(content, batch_params)
             elif isinstance(content, dict):
                 # For objects, run concurrent translations to each target locale
                 tasks = []
                 for target_locale in target_locales:
-                    task_params = {**params, "target_locale": target_locale}
+                    task_params = {
+                        "source_locale": source_locale,
+                        "target_locale": target_locale,
+                        "fast": fast,
+                    }
                     task = engine.localize_object(content, task_params, concurrent=True)
                     tasks.append(task)
                 return await asyncio.gather(*tasks)
