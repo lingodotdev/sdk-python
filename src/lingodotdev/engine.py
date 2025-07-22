@@ -10,7 +10,7 @@ from urllib.parse import urljoin
 
 import httpx
 from nanoid import generate
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, validator
 
 
 class EngineConfig(BaseModel):
@@ -21,7 +21,7 @@ class EngineConfig(BaseModel):
     batch_size: int = Field(default=25, ge=1, le=250)
     ideal_batch_item_size: int = Field(default=250, ge=1, le=2500)
 
-    @field_validator("api_url")
+    @validator("api_url")
     @classmethod
     def validate_api_url(cls, v: str) -> str:
         if not v.startswith(("http://", "https://")):
