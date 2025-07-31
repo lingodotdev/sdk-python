@@ -164,8 +164,39 @@ config = {
     "api_key": "your-api-key",              # Required: Your API key
     "api_url": "https://engine.lingo.dev",  # Optional: API endpoint
     "batch_size": 25,                       # Optional: Items per batch (1-250)
-    "ideal_batch_item_size": 250            # Optional: Target words per batch (1-2500)
+    "ideal_batch_item_size": 250,           # Optional: Target words per batch (1-2500)
+    "retry_max_attempts": 3,                # Optional: Max retry attempts (0-10, 0=disabled)
+    "retry_base_delay": 1.0,                # Optional: Base delay between retries (0.1-10.0s)
+    "retry_max_timeout": 60.0               # Optional: Total timeout for all retries (1-300s)
 }
+```
+
+### 🔄 Retry Behavior
+
+The SDK automatically handles transient failures with intelligent exponential backoff:
+
+- **Retries**: 5xx server errors, 429 rate limits, and network timeouts
+- **No retries**: 4xx client errors (except 429)
+- **Exponential backoff**: `base_delay * (2^attempt) + jitter`
+- **Rate limiting**: Respects `Retry-After` headers from 429 responses
+- **Timeout protection**: Stops retrying if total time would exceed `retry_max_timeout`
+
+```python
+# Custom retry configuration
+from lingodotdev import EngineConfig
+
+config = EngineConfig(
+    api_key="your-api-key",
+    retry_max_attempts=5,      # More aggressive retrying
+    retry_base_delay=0.5,      # Faster initial retry
+    retry_max_timeout=30.0     # Shorter total timeout
+)
+
+async with LingoDotDevEngine(config) as engine:
+    result = await engine.localize_text("Hello", {"target_locale": "es"})
+
+# Disable retries completely
+config = EngineConfig(api_key="your-api-key", retry_max_attempts=0)
 ```
 
 ## 🎛️ Method Parameters
