@@ -5,6 +5,7 @@ LingoDotDevEngine implementation for Python SDK - Async version with httpx
 # mypy: disable-error-code=unreachable
 
 import asyncio
+import random
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urljoin
 
@@ -20,6 +21,8 @@ class EngineConfig(BaseModel):
     api_url: str = "https://engine.lingo.dev"
     batch_size: int = Field(default=25, ge=1, le=250)
     ideal_batch_item_size: int = Field(default=250, ge=1, le=2500)
+    retry_max_attempts: int = Field(default=3, ge=0, le=10)
+    retry_base_delay: float = Field(default=1.0, ge=0.1, le=10.0)
 
     @validator("api_url")
     @classmethod
@@ -79,6 +82,93 @@ class LingoDotDevEngine:
         """Close the httpx client"""
         if self._client and not self._client.is_closed:
             await self._client.aclose()
+
+    def _should_retry_response(self, response: httpx.Response) -> bool:
+        """
+        Determine if a response should be retried.
+        
+        Args:
+            response: The HTTP response to evaluate
+            
+        Returns:
+            True if the response indicates a retryable error, False otherwise
+        """
+        # Retry on server errors (5xx) and rate limiting (429)
+        return response.status_code >= 500 or response.status_code == 429
+
+    def _calculate_retry_delay(self, attempt: int, response: Optional[httpx.Response]) -> float:
+        """
+        Calculate delay for next retry attempt using exponential backoff with jitter.
+        
+        Args:
+            attempt: The current attempt number (0-based)
+            response: The HTTP response (if available) to check for Retry-After header
+            
+        Returns:
+            Delay in seconds before next retry attempt
+        """
+        # Base exponential backoff: base_delay * (2 ^ attempt)
+        base_delay = self.config.retry_base_delay * (2 ** attempt)
+        
+        # Handle 429 Retry-After header
+        if response and response.status_code == 429:
+            retry_after = response.headers.get('retry-after')
+            if retry_after:
+                try:
+                    retry_after_seconds = float(retry_after)
+                    base_delay = max(base_delay, retry_after_seconds)
+                except ValueError:
+                    # Invalid retry-after header, use exponential backoff
+                    pass
+        
+        # Add jitter (0-10% of calculated delay) to prevent thundering herd
+        jitter = random.uniform(0, 0.1 * base_delay)
+        return base_delay + jitter
+
+    async def _make_request_with_retry(
+        self, url: str, request_data: Dict[str, Any]
+    ) -> httpx.Response:
+        """
+        Make HTTP request with exponential backoff retry logic.
+        
+        Args:
+            url: The URL to make the request to
+            request_data: The JSON data to send in the request
+            
+        Returns:
+            The HTTP response from the successful request
+            
+        Raises:
+            RuntimeError: When all retry attempts are exhausted
+        """
+        await self._ensure_client()
+        assert self._client is not None  # Type guard for mypy
+        
+        last_exception = None
+        
+        for attempt in range(self.config.retry_max_attempts + 1):
+            try:
+                response = await self._client.post(url, json=request_data)
+                
+                # Check if response should be retried
+                if self._should_retry_response(response) and attempt < self.config.retry_max_attempts:
+                    delay = self._calculate_retry_delay(attempt, response)
+                    await asyncio.sleep(delay)
+                    continue
+                    
+                return response
+                
+            except httpx.RequestError as e:
+                last_exception = e
+                if attempt < self.config.retry_max_attempts:
+                    delay = self._calculate_retry_delay(attempt, None)
+                    await asyncio.sleep(delay)
+                    continue
+                break
+        
+        # All retries exhausted
+        total_attempts = self.config.retry_max_attempts + 1
+        raise RuntimeError(f"Request failed after {total_attempts} attempts: {last_exception}")
 
     async def _localize_raw(
         self,
@@ -181,7 +271,7 @@ class LingoDotDevEngine:
             request_data["reference"] = payload["reference"]
 
         try:
-            response = await self._client.post(url, json=request_data)
+            response = await self._make_request_with_retry(url, request_data)
 
             if not response.is_success:
                 if 500 <= response.status_code < 600:
@@ -423,7 +513,7 @@ class LingoDotDevEngine:
         url = urljoin(self.config.api_url, "/recognize")
 
         try:
-            response = await self._client.post(url, json={"text": text})
+            response = await self._make_request_with_retry(url, {"text": text})
 
             if not response.is_success:
                 if 500 <= response.status_code < 600:
@@ -453,7 +543,7 @@ class LingoDotDevEngine:
         url = urljoin(self.config.api_url, "/whoami")
 
         try:
-            response = await self._client.post(url)
+            response = await self._make_request_with_retry(url, {})
 
             if response.is_success:
                 payload = response.json()
