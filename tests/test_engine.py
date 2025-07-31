@@ -133,6 +133,29 @@ class TestEngineConfig:
         assert config2.retry_max_attempts == 1
         assert config2.retry_base_delay == 10.0
 
+    def test_valid_retry_max_timeout(self):
+        """Test valid retry_max_timeout values"""
+        # Test boundary values
+        config_min = EngineConfig(api_key="test_key", retry_max_timeout=1.0)
+        assert config_min.retry_max_timeout == 1.0
+        
+        config_max = EngineConfig(api_key="test_key", retry_max_timeout=300.0)
+        assert config_max.retry_max_timeout == 300.0
+        
+        # Test default value
+        config_default = EngineConfig(api_key="test_key")
+        assert config_default.retry_max_timeout == 60.0
+
+    def test_invalid_retry_max_timeout(self):
+        """Test invalid retry_max_timeout validation"""
+        # Test below minimum
+        with pytest.raises(ValueError):
+            EngineConfig(api_key="test_key", retry_max_timeout=0.5)
+        
+        # Test above maximum
+        with pytest.raises(ValueError):
+            EngineConfig(api_key="test_key", retry_max_timeout=400.0)
+
 
 @pytest.mark.asyncio
 class TestLingoDotDevEngine:
@@ -756,6 +779,42 @@ class TestLingoDotDevEngine:
         error_message = str(exc_info.value)
         assert "Request failed after 3 attempts" in error_message
         assert "Connection timeout" in error_message
+
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    @patch("asyncio.sleep")
+    @patch("time.time")
+    async def test_make_request_with_retry_timeout_exceeded(self, mock_time, mock_sleep, mock_post):
+        """Test timeout cap prevents excessive retry delays"""
+        # Create engine with short timeout
+        engine = LingoDotDevEngine({
+            "api_key": "test_key", 
+            "retry_max_timeout": 2.0, 
+            "retry_base_delay": 1.0
+        })
+        
+        # Mock time progression: start at 0, then simulate time passing
+        # First call: start time (0.0)
+        # Second call: check after first attempt (1.8s elapsed)
+        # The next delay would be ~2s, so 1.8 + 2 > 2.0 timeout
+        mock_time.side_effect = [0.0, 1.8, 1.8]
+        
+        # All attempts return 500 (retryable error)
+        mock_response = Mock()
+        mock_response.is_success = False
+        mock_response.status_code = 500
+        mock_post.return_value = mock_response
+        
+        with pytest.raises(RuntimeError) as exc_info:
+            await engine._make_request_with_retry(
+                "https://api.test.com/test", {"data": "test"}
+            )
+        
+        error_message = str(exc_info.value)
+        assert "timeout exceeded" in error_message
+        assert "1.8s" in error_message
+        
+        # Should only make 1 attempt before timeout check prevents retry
+        assert mock_post.call_count == 1
 
     @patch("lingodotdev.engine.LingoDotDevEngine._make_request_with_retry")
     async def test_localize_chunk_uses_retry_wrapper(self, mock_retry_wrapper):

@@ -5,6 +5,7 @@ LingoDotDevEngine implementation for Python SDK - Async version with httpx
 # mypy: disable-error-code=unreachable
 
 import asyncio
+import logging
 import random
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urljoin
@@ -23,6 +24,7 @@ class EngineConfig(BaseModel):
     ideal_batch_item_size: int = Field(default=250, ge=1, le=2500)
     retry_max_attempts: int = Field(default=3, ge=0, le=10)
     retry_base_delay: float = Field(default=1.0, ge=0.1, le=10.0)
+    retry_max_timeout: float = Field(default=60.0, ge=1.0, le=300.0)
 
     @validator("api_url")
     @classmethod
@@ -139,12 +141,16 @@ class LingoDotDevEngine:
             The HTTP response from the successful request
             
         Raises:
-            RuntimeError: When all retry attempts are exhausted
+            RuntimeError: When all retry attempts are exhausted or timeout exceeded
         """
         await self._ensure_client()
         assert self._client is not None  # Type guard for mypy
         
+        import time
+        start_time = time.time()
         last_exception = None
+        logger = logging.getLogger(__name__)
+        timeout_exceeded = False
         
         for attempt in range(self.config.retry_max_attempts + 1):
             try:
@@ -153,22 +159,46 @@ class LingoDotDevEngine:
                 # Check if response should be retried
                 if self._should_retry_response(response) and attempt < self.config.retry_max_attempts:
                     delay = self._calculate_retry_delay(attempt, response)
+                    
+                    # Check if delay would exceed total timeout
+                    elapsed_time = time.time() - start_time
+                    if elapsed_time + delay > self.config.retry_max_timeout:
+                        logger.debug(f"Retry timeout would be exceeded, stopping retries after {elapsed_time:.1f}s")
+                        timeout_exceeded = True
+                        break
+                    
+                    logger.debug(f"Request failed with status {response.status_code}, retrying in {delay:.1f}s (attempt {attempt + 1}/{self.config.retry_max_attempts + 1})")
                     await asyncio.sleep(delay)
                     continue
                     
+                if attempt > 0:
+                    logger.debug(f"Request succeeded after {attempt + 1} attempts")
                 return response
                 
             except httpx.RequestError as e:
                 last_exception = e
                 if attempt < self.config.retry_max_attempts:
                     delay = self._calculate_retry_delay(attempt, None)
+                    
+                    # Check if delay would exceed total timeout
+                    elapsed_time = time.time() - start_time
+                    if elapsed_time + delay > self.config.retry_max_timeout:
+                        logger.debug(f"Retry timeout would be exceeded, stopping retries after {elapsed_time:.1f}s")
+                        timeout_exceeded = True
+                        break
+                    
+                    logger.debug(f"Request failed with {type(e).__name__}: {e}, retrying in {delay:.1f}s (attempt {attempt + 1}/{self.config.retry_max_attempts + 1})")
                     await asyncio.sleep(delay)
                     continue
                 break
         
-        # All retries exhausted
-        total_attempts = self.config.retry_max_attempts + 1
-        raise RuntimeError(f"Request failed after {total_attempts} attempts: {last_exception}")
+        # All retries exhausted or timeout exceeded
+        total_attempts = attempt + 1
+        elapsed_time = time.time() - start_time
+        if timeout_exceeded:
+            raise RuntimeError(f"Request failed after {elapsed_time:.1f}s (timeout exceeded): {last_exception}")
+        else:
+            raise RuntimeError(f"Request failed after {total_attempts} attempts: {last_exception}")
 
     async def _localize_raw(
         self,
