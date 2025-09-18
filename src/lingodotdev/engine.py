@@ -1,5 +1,8 @@
 """
-LingoDotDevEngine implementation for Python SDK - Async version with httpx
+Async client implementation for the Lingo.dev localization service.
+
+This module houses :class:`LingoDotDevEngine` alongside supporting data models
+used to validate configuration and localization parameters.
 """
 
 # mypy: disable-error-code=unreachable
@@ -14,7 +17,17 @@ from pydantic import BaseModel, Field, validator
 
 
 class EngineConfig(BaseModel):
-    """Configuration for the LingoDotDevEngine"""
+    """Stores and validates runtime configuration for :class:`LingoDotDevEngine`.
+
+    Attributes:
+        api_key: Secret token used to authenticate with the Lingo.dev API.
+        api_url: Base endpoint for the localization engine. Defaults to
+            ``https://engine.lingo.dev``.
+        batch_size: Maximum number of top-level entries to send in a single
+            localization request (between 1 and 250 inclusive).
+        ideal_batch_item_size: Target word count per request before payloads are
+            split into multiple batches (between 1 and 2500 inclusive).
+    """
 
     api_key: str
     api_url: str = "https://engine.lingo.dev"
@@ -30,7 +43,20 @@ class EngineConfig(BaseModel):
 
 
 class LocalizationParams(BaseModel):
-    """Parameters for localization requests"""
+    """Request parameters accepted by localization operations.
+
+    These values are serialized directly into API requests after validation.
+
+    Attributes:
+        source_locale: Optional BCP 47 language code representing the source
+            language. When omitted the API attempts automatic detection.
+        target_locale: Required BCP 47 language code for the desired translation
+            target.
+        fast: Optional flag that enables the service's low-latency translation
+            mode at the cost of some quality safeguards.
+        reference: Optional nested mapping of existing translations that
+            provides additional context to the engine.
+    """
 
     source_locale: Optional[str] = None
     target_locale: str
@@ -39,33 +65,48 @@ class LocalizationParams(BaseModel):
 
 
 class LingoDotDevEngine:
-    """
-    LingoDotDevEngine class for interacting with the LingoDotDev API
-    A powerful localization engine that supports various content types including
-    plain text, objects, chat sequences, and HTML documents.
+    """Asynchronous client for the Lingo.dev localization API.
+
+    The engine manages an :class:`httpx.AsyncClient`, handles chunking and
+    batching of content, and exposes helper coroutines for translating strings,
+    structured objects, and chat transcripts. Instances can be reused or
+    managed via an async context manager::
+
+        async with LingoDotDevEngine({"api_key": "..."}) as engine:
+            await engine.localize_text("Hello", {"target_locale": "es"})
+
+    All localization methods are ``async`` and must be awaited.
     """
 
     def __init__(self, config: Dict[str, Any]):
-        """
-        Create a new LingoDotDevEngine instance
+        """Instantiate the engine with configuration data.
 
         Args:
-            config: Configuration options for the Engine
+            config: Mapping of values understood by
+                :class:`EngineConfig`. At minimum an ``api_key`` entry must
+                be supplied.
+
+        Raises:
+            ValueError: If the supplied configuration fails validation.
         """
         self.config = EngineConfig(**config)
         self._client: Optional[httpx.AsyncClient] = None
 
     async def __aenter__(self):
-        """Async context manager entry"""
+        """Open the HTTP session when entering an async context.
+
+        Returns:
+            LingoDotDevEngine: The active engine instance.
+        """
         await self._ensure_client()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit"""
+        """Release resources acquired during the async context."""
         await self.close()
 
     async def _ensure_client(self):
-        """Ensure the httpx client is initialized"""
+        """Create an :class:`httpx.AsyncClient` if one is not already available."""
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 headers={
@@ -76,7 +117,7 @@ class LingoDotDevEngine:
             )
 
     async def close(self):
-        """Close the httpx client"""
+        """Close the HTTP client if it has been created."""
         if self._client and not self._client.is_closed:
             await self._client.aclose()
 
@@ -89,17 +130,28 @@ class LingoDotDevEngine:
         ] = None,
         concurrent: bool = False,
     ) -> Dict[str, str]:
-        """
-        Localize content using the Lingo.dev API
+        """Submit a localization request for the provided payload.
+
+        The payload is split into chunks based on the configured limits and the
+        resulting pieces are localized sequentially or concurrently. Sequential
+        mode enables progress reporting while concurrent mode maximizes
+        throughput.
 
         Args:
-            payload: The content to be localized
-            params: Localization parameters
-            progress_callback: Optional callback function to report progress (0-100)
-            concurrent: Whether to process chunks concurrently (faster but no progress tracking)
+            payload: Mapping or structured content to be localized.
+            params: Pre-validated localization parameters.
+            progress_callback: Optional callable invoked after each chunk is
+                localized. Receives the percentage completed, the source chunk,
+                and the localized chunk.
+            concurrent: When ``True`` and no ``progress_callback`` is supplied,
+                chunks are processed concurrently.
 
         Returns:
-            Localized content
+            Dictionary containing the merged localized chunks.
+
+        Raises:
+            RuntimeError: If the API responds with an error.
+            ValueError: If the API rejects the payload.
         """
         await self._ensure_client()
         chunked_payload = self._extract_payload_chunks(payload)
@@ -154,18 +206,24 @@ class LingoDotDevEngine:
         workflow_id: str,
         fast: bool,
     ) -> Dict[str, str]:
-        """
-        Localize a single chunk of content
+        """Translate a single payload chunk through the ``/i18n`` endpoint.
 
         Args:
-            source_locale: Source locale
-            target_locale: Target locale
-            payload: Payload containing the chunk to be localized
-            workflow_id: Workflow ID for tracking
-            fast: Whether to use fast mode
+            source_locale: Optional source locale used for the request.
+            target_locale: Target locale requested from the API.
+            payload: Dictionary containing the chunk under the ``data`` key and
+                optional ``reference`` metadata.
+            workflow_id: Identifier shared across chunks that belong to the
+                same localization workflow.
+            fast: Whether to request the service's fast translation mode.
 
         Returns:
-            Localized chunk
+            A dictionary representing the localized chunk returned by the API.
+
+        Raises:
+            RuntimeError: If the API responds with an error status or signals a
+                streaming error.
+            ValueError: If the API reports an invalid request (HTTP 400).
         """
         await self._ensure_client()
         assert self._client is not None  # Type guard for mypy
@@ -208,14 +266,17 @@ class LingoDotDevEngine:
             raise RuntimeError(f"Request failed: {str(e)}")
 
     def _extract_payload_chunks(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        Extract payload chunks based on the ideal chunk size
+        """Split a payload into smaller dictionaries based on configured limits.
+
+        The method iterates through the payload in insertion order, grouping
+        keys until the number of words or items would exceed the configured
+        thresholds. Each chunk is suitable for sending directly to the API.
 
         Args:
-            payload: The payload to be chunked
+            payload: Mapping to be divided into localization chunks.
 
         Returns:
-            An array of payload chunks
+            List of dictionaries representing individual request chunks.
         """
         result = []
         current_chunk = {}
@@ -240,14 +301,13 @@ class LingoDotDevEngine:
         return result
 
     def _count_words_in_record(self, payload: Any) -> int:
-        """
-        Count words in a record or array
+        """Recursively count whitespace-delimited words within a payload.
 
         Args:
-            payload: The payload to count words in
+            payload: String, mapping, list, or other primitive values to count.
 
         Returns:
-            The total number of words
+            Total number of words discovered within string values.
         """
         if isinstance(payload, list):
             return sum(self._count_words_in_record(item) for item in payload)
@@ -267,20 +327,47 @@ class LingoDotDevEngine:
         ] = None,
         concurrent: bool = False,
     ) -> Dict[str, Any]:
-        """
-        Localize a typical Python dictionary
+        """Localize every string value contained in a mapping.
 
         Args:
-            obj: The object to be localized (strings will be extracted and translated)
-            params: Localization parameters:
-                - source_locale: The source language code (e.g., 'en')
-                - target_locale: The target language code (e.g., 'es')
-                - fast: Optional boolean to enable fast mode
-            progress_callback: Optional callback function to report progress (0-100)
-            concurrent: Whether to process chunks concurrently (faster but no progress tracking)
+            obj: Mapping whose string leaves should be translated.
+            params: Dictionary of options accepted by
+                :class:`LocalizationParams`.
+            progress_callback: Optional callable invoked with progress updates
+                (0-100) alongside the source and localized chunks. If provided,
+                leave ``concurrent`` as ``False`` (the default) because progress
+                updates are unavailable in concurrent mode.
+            concurrent: When ``True`` the payload chunks are processed
+                concurrently and no progress updates are emitted.
 
         Returns:
-            A new object with the same structure but localized string values
+            A dictionary mirroring ``obj`` with localized string values.
+
+        Raises:
+            RuntimeError: If the API responds with an error.
+            ValueError: If the API rejects the request.
+
+        Examples:
+            .. code-block:: python
+
+                async with LingoDotDevEngine({"api_key": "token"}) as engine:
+                    localized = await engine.localize_object(
+                        {"title": "Hello"},
+                        {"target_locale": "es"},
+                        concurrent=True,
+                    )
+                    # localized -> {"title": "Hola"}  (example output)
+
+                async with LingoDotDevEngine({"api_key": "token"}) as engine:
+                    def on_progress(percent, *_):
+                        print(f"Progress: {percent}%")
+
+                    localized = await engine.localize_object(
+                        {"welcome": "Hello", "farewell": "Goodbye"},
+                        {"source_locale": "en", "target_locale": "fr"},
+                        progress_callback=on_progress,
+                    )
+                    # localized -> {"welcome": "Bonjour", "farewell": "Au revoir"}  (example output)
         """
         localization_params = LocalizationParams(**params)
         return await self._localize_raw(
@@ -293,19 +380,40 @@ class LingoDotDevEngine:
         params: Dict[str, Any],
         progress_callback: Optional[Callable[[int], None]] = None,
     ) -> str:
-        """
-        Localize a single text string
+        """Localize a single text string.
 
         Args:
-            text: The text string to be localized
-            params: Localization parameters:
-                - source_locale: The source language code (e.g., 'en')
-                - target_locale: The target language code (e.g., 'es')
-                - fast: Optional boolean to enable fast mode
-            progress_callback: Optional callback function to report progress (0-100)
+            text: The text to translate.
+            params: Dictionary of options accepted by
+                :class:`LocalizationParams`.
+            progress_callback: Optional callable receiving the percentage
+                complete (0-100).
 
         Returns:
-            The localized text string
+            The localized text string.
+
+        Raises:
+            RuntimeError: If the API responds with an error.
+            ValueError: If the API rejects the request.
+
+        Examples:
+            .. code-block:: python
+
+                async with LingoDotDevEngine({"api_key": "token"}) as engine:
+                    greeting = await engine.localize_text(
+                        "Hello", {"target_locale": "de"}
+                    )
+                    # greeting -> "Hallo"  (example output)
+
+                progress_updates = []
+
+                async with LingoDotDevEngine({"api_key": "token"}) as engine:
+                    farewell = await engine.localize_text(
+                        "Goodbye",
+                        {"source_locale": "en", "target_locale": "it"},
+                        progress_callback=progress_updates.append,
+                    )
+                    # farewell -> "Arrivederci"  (example output)
         """
         localization_params = LocalizationParams(**params)
 
@@ -322,18 +430,41 @@ class LingoDotDevEngine:
         return response.get("text", "")
 
     async def batch_localize_text(self, text: str, params: Dict[str, Any]) -> List[str]:
-        """
-        Localize a text string to multiple target locales
+        """Localize a single text string into multiple target locales.
 
         Args:
-            text: The text string to be localized
-            params: Localization parameters:
-                - source_locale: The source language code (e.g., 'en')
-                - target_locales: A list of target language codes (e.g., ['es', 'fr'])
-                - fast: Optional boolean to enable fast mode
+            text: The text string to translate.
+            params: Dictionary of options accepted by
+                :class:`LocalizationParams` plus a ``target_locales`` list.
 
         Returns:
-            A list of localized text strings
+            List of localized strings ordered to match ``target_locales``.
+
+        Raises:
+            ValueError: If ``target_locales`` is missing or the API rejects a
+                request.
+            RuntimeError: If the API responds with an error.
+
+        Examples:
+            .. code-block:: python
+
+                async with LingoDotDevEngine({"api_key": "token"}) as engine:
+                    variants = await engine.batch_localize_text(
+                        "Welcome",
+                        {"target_locales": ["es", "fr"]},
+                    )
+                    # variants -> ["Bienvenido", "Bienvenue"]  (example output)
+
+                async with LingoDotDevEngine({"api_key": "token"}) as engine:
+                    variants = await engine.batch_localize_text(
+                        "Checkout",
+                        {
+                            "source_locale": "en",
+                            "target_locales": ["pt-BR", "it"],
+                            "fast": True,
+                        },
+                    )
+                    # variants -> ["Finalizar compra", "Pagamento"]  (example output)
         """
         if "target_locales" not in params:
             raise ValueError("target_locales is required")
@@ -365,19 +496,48 @@ class LingoDotDevEngine:
         params: Dict[str, Any],
         progress_callback: Optional[Callable[[int], None]] = None,
     ) -> List[Dict[str, str]]:
-        """
-        Localize a chat sequence while preserving speaker names
+        """Localize a chat transcript while preserving speaker metadata.
 
         Args:
-            chat: Array of chat messages, each with 'name' and 'text' properties
-            params: Localization parameters:
-                - source_locale: The source language code (e.g., 'en')
-                - target_locale: The target language code (e.g., 'es')
-                - fast: Optional boolean to enable fast mode
-            progress_callback: Optional callback function to report progress (0-100)
+            chat: Sequence of chat messages. Each item must include ``name`` and
+                ``text`` keys.
+            params: Dictionary of options accepted by
+                :class:`LocalizationParams`.
+            progress_callback: Optional callable receiving percentage updates
+                (0-100) while the transcript is localized.
 
         Returns:
-            Array of localized chat messages with preserved structure
+            List of localized chat messages in the same order as ``chat``. If
+            the API omits chat data an empty list is returned.
+
+        Raises:
+            ValueError: If any message in ``chat`` omits the required keys.
+            RuntimeError: If the API responds with an error.
+
+        Examples:
+            .. code-block:: python
+
+                chat = [
+                    {"name": "Alice", "text": "Hello"},
+                    {"name": "Bob", "text": "Goodbye"},
+                ]
+
+                async with LingoDotDevEngine({"api_key": "token"}) as engine:
+                    translated = await engine.localize_chat(
+                        chat,
+                        {"target_locale": "es"},
+                    )
+                    # translated -> [{"name": "Alice", "text": "Hola"}, ...]  (example output)
+
+                updates = []
+
+                async with LingoDotDevEngine({"api_key": "token"}) as engine:
+                    translated = await engine.localize_chat(
+                        chat,
+                        {"source_locale": "en", "target_locale": "de"},
+                        progress_callback=updates.append,
+                    )
+                    # translated -> [{"name": "Alice", "text": "Hallo"}, ...]  (example output)
         """
         # Validate chat format
         for message in chat:
@@ -406,14 +566,18 @@ class LingoDotDevEngine:
         return []
 
     async def recognize_locale(self, text: str) -> str:
-        """
-        Detect the language of a given text
+        """Detect the language of the supplied text via the ``/recognize`` endpoint.
 
         Args:
-            text: The text to analyze
+            text: Non-empty string to analyse.
 
         Returns:
-            A locale code (e.g., 'en', 'es', 'fr')
+            Locale code reported by the API (for example ``"en"``) or an empty
+            string when the service cannot determine a locale.
+
+        Raises:
+            ValueError: If ``text`` is empty or only whitespace.
+            RuntimeError: If the request fails or the API reports an error.
         """
         if not text or not text.strip():
             raise ValueError("Text cannot be empty")
@@ -442,11 +606,15 @@ class LingoDotDevEngine:
             raise RuntimeError(f"Request failed: {str(e)}")
 
     async def whoami(self) -> Optional[Dict[str, str]]:
-        """
-        Get information about the current API key
+        """Retrieve account metadata associated with the current API key.
 
         Returns:
-            Dictionary with 'email' and 'id' keys, or None if not authenticated
+            Dictionary containing ``email`` and ``id`` keys when available, or
+            ``None`` if the key is unauthenticated or a recoverable network
+            error occurs.
+
+        Raises:
+            RuntimeError: If the service reports a server-side error.
         """
         await self._ensure_client()
         assert self._client is not None  # Type guard for mypy
@@ -477,15 +645,19 @@ class LingoDotDevEngine:
     async def batch_localize_objects(
         self, objects: List[Dict[str, Any]], params: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
-        """
-        Localize multiple objects concurrently
+        """Localize multiple mapping objects concurrently.
 
         Args:
-            objects: List of objects to localize
-            params: Localization parameters
+            objects: List of objects whose string values should be translated.
+            params: Dictionary of options accepted by
+                :class:`LocalizationParams`, shared across all objects.
 
         Returns:
-            List of localized objects
+            List of localized objects preserving the order of ``objects``.
+
+        Raises:
+            RuntimeError: If the API responds with an error.
+            ValueError: If the API rejects a request.
         """
         tasks = []
         for obj in objects:
@@ -504,35 +676,50 @@ class LingoDotDevEngine:
         api_url: str = "https://engine.lingo.dev",
         fast: bool = True,
     ) -> Any:
-        """
-        Quick one-off translation without manual context management.
-        Automatically handles the async context manager.
+        """Translate content without managing an engine instance manually.
+
+        The helper opens an :class:`LingoDotDevEngine` using the supplied
+        configuration, performs the translation, and automatically closes the
+        underlying HTTP client.
 
         Args:
-            content: Text string or dict to translate
-            api_key: Your Lingo.dev API key
-            target_locale: Target language code (e.g., 'es', 'fr')
-            source_locale: Source language code (optional, auto-detected if None)
-            api_url: API endpoint URL
-            fast: Enable fast mode for quicker translations
+            content: Text string or mapping to translate. The returned value
+                matches the type of ``content``.
+            api_key: Lingo.dev API key to authenticate the request.
+            target_locale: Target language code for the translation.
+            source_locale: Optional source language code. When omitted the API
+                may attempt to detect it.
+            api_url: Lingo.dev engine base URL. Defaults to
+                ``"https://engine.lingo.dev"``.
+            fast: Whether to enable the service's fast translation mode.
 
         Returns:
-            Translated content (same type as input)
+            Translated content with the same type as ``content``.
 
-        Example:
-            # Translate text
-            result = await LingoDotDevEngine.quick_translate(
-                "Hello world",
-                "your-api-key",
-                "es"
-            )
+        Raises:
+            ValueError: If ``content`` is not a string or dictionary, or if the
+                service rejects the request.
+            RuntimeError: If the API indicates a failure or the request cannot
+                be completed.
 
-            # Translate object
-            result = await LingoDotDevEngine.quick_translate(
-                {"greeting": "Hello", "farewell": "Goodbye"},
-                "your-api-key",
-                "es"
-            )
+        Examples:
+            .. code-block:: python
+
+                greeting = await LingoDotDevEngine.quick_translate(
+                    "Hello world",
+                    api_key="api-key",
+                    target_locale="es",
+                )
+                # greeting -> "Hola mundo"  (example output)
+
+                landing_page = await LingoDotDevEngine.quick_translate(
+                    {"headline": "Hello", "cta": "Buy now"},
+                    api_key="api-key",
+                    target_locale="de",
+                    source_locale="en",
+                    fast=False,
+                )
+                # landing_page -> {"headline": "Hallo", "cta": "Jetzt kaufen"}  (example output)
         """
         config = {
             "api_key": api_key,
@@ -563,28 +750,48 @@ class LingoDotDevEngine:
         api_url: str = "https://engine.lingo.dev",
         fast: bool = True,
     ) -> List[Any]:
-        """
-        Quick batch translation to multiple target locales.
-        Automatically handles the async context manager.
+        """Translate content into multiple locales without manual setup.
 
         Args:
-            content: Text string or dict to translate
-            api_key: Your Lingo.dev API key
-            target_locales: List of target language codes (e.g., ['es', 'fr', 'de'])
-            source_locale: Source language code (optional, auto-detected if None)
-            api_url: API endpoint URL
-            fast: Enable fast mode for quicker translations
+            content: Text string or mapping to translate for each locale.
+            api_key: Lingo.dev API key to authenticate requests.
+            target_locales: List of locale codes. Results maintain this order.
+            source_locale: Optional source language code. When omitted the API
+                may attempt to detect it.
+            api_url: Lingo.dev engine base URL. Defaults to
+                ``"https://engine.lingo.dev"``.
+            fast: Whether to enable the service's fast translation mode.
 
         Returns:
-            List of translated content (one for each target locale)
+            List of translated content, one entry per ``target_locales`` item.
 
-        Example:
-            results = await LingoDotDevEngine.quick_batch_translate(
-                "Hello world",
-                "your-api-key",
-                ["es", "fr", "de"]
-            )
-            # Results: ["Hola mundo", "Bonjour le monde", "Hallo Welt"]
+        Raises:
+            ValueError: If ``content`` is not a string or dictionary, or if a
+                request is rejected by the API.
+            RuntimeError: If the API indicates a failure or the request cannot
+                be completed.
+
+        Examples:
+            .. code-block:: python
+
+                variants = await LingoDotDevEngine.quick_batch_translate(
+                    "Hello world",
+                    api_key="api-key",
+                    target_locales=["es", "fr"],
+                )
+                # variants -> ["Hola mundo", "Bonjour le monde"]  (example output)
+
+                localized_objects = await LingoDotDevEngine.quick_batch_translate(
+                    {"success": "Saved", "error": "Failed"},
+                    api_key="api-key",
+                    target_locales=["pt-BR", "it"],
+                    source_locale="en",
+                    fast=False,
+                )
+                # localized_objects -> [
+                #     {"success": "Salvo", "error": "Falhou"},
+                #     {"success": "Salvato", "error": "Non riuscito"},
+                # ]  (example output)
         """
         config = {
             "api_key": api_key,
