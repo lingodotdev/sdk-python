@@ -8,12 +8,15 @@ used to validate configuration and localization parameters.
 # mypy: disable-error-code=unreachable
 
 import asyncio
+import re
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urljoin
 
 import httpx
 from nanoid import generate
 from pydantic import BaseModel, Field, validator
+
+_BCP47_TAG_RE = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
 
 
 class EngineConfig(BaseModel):
@@ -62,6 +65,17 @@ class LocalizationParams(BaseModel):
     target_locale: str
     fast: Optional[bool] = None
     reference: Optional[Dict[str, Dict[str, Any]]] = None
+
+    @validator("source_locale", "target_locale")
+    @classmethod
+    def validate_locale(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if not _BCP47_TAG_RE.fullmatch(v):
+            raise ValueError(
+                "Locale values must be valid BCP 47 language tags (example: 'en', 'en-US')."
+            )
+        return v
 
 
 class LingoDotDevEngine:
