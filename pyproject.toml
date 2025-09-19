@@ -44,6 +44,7 @@ dev = [
     "flake8>=6.0.0",
     "mypy>=1.0.0",
     "python-semantic-release>=8.0.0",
+    "pydoc-markdown>=4.8",
 ]
 
 [project.urls]
