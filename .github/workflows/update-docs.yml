@@ -2,11 +2,10 @@ name: Regenerate API Docs
 
 on:
   push:
-    branches:
-      - main
     paths:
       - 'src/**'
       - 'pyproject.toml'
+      - 'pydoc-markdown.yml'
   workflow_dispatch:
 
 permissions:
