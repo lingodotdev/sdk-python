@@ -9,7 +9,6 @@ from unittest.mock import patch, Mock
 
 from lingodotdev import LingoDotDevEngine
 
-
 # Skip integration tests if no API key is provided
 pytestmark = pytest.mark.skipif(
     not os.getenv("LINGODOTDEV_API_KEY"),
