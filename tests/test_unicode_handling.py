@@ -37,3 +37,36 @@ async def test_malformed_unicode_handling():
                 assert "Response:" in error_msg
             except Exception as e:
                 pytest.fail(f"Caught unexpected exception: {type(e).__name__}: {e}")
+
+@pytest.mark.asyncio
+async def test_unicode_error_in_400_response():
+    """Test that a 400 response with invalid unicode is handled safely"""
+    config = {"api_key": "test_key", "api_url": "https://api.test.com"}
+    invalid_bytes = b"\xff\xfe\xfd"
+
+    with patch("lingodotdev.engine.httpx.AsyncClient.post") as mock_post:
+        mock_response = Mock()
+        mock_response.is_success = False
+        mock_response.status_code = 400
+        mock_response.reason_phrase = "Bad Request"
+        # json() raises UnicodeDecodeError
+        mock_response.json.side_effect = UnicodeDecodeError("utf-8", invalid_bytes, 0, 1, "invalid start byte")
+        # text property raises UnicodeDecodeError (simulating access to .text)
+        type(mock_response).text = PropertyMock(side_effect=UnicodeDecodeError("utf-8", invalid_bytes, 0, 1, "invalid start byte"))
+        # content returning bytes
+        mock_response.content = invalid_bytes
+        
+        mock_post.return_value = mock_response
+
+        async with LingoDotDevEngine(config) as engine:
+            try:
+                # Should raise ValueError for 400
+                await engine.localize_text("hello", {"target_locale": "es"})
+                pytest.fail("ValueError was not raised")
+            except ValueError as exc:
+                error_msg = str(exc)
+                assert "Invalid request (400)" in error_msg
+                # Verify that we fell back to safe decoding
+                assert "Response:" in error_msg
+            except Exception as e:
+                pytest.fail(f"Caught unexpected exception: {type(e).__name__}: {e}")

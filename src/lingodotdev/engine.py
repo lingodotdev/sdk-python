@@ -220,7 +220,6 @@ class LingoDotDevEngine:
             response = await self._client.post(url, json=request_data)
 
             if not response.is_success:
-                response_preview = self._truncate_response(response.text)
                 if 500 <= response.status_code < 600:
                     error_details = ""
                     try:
@@ -229,13 +228,19 @@ class LingoDotDevEngine:
                             error_details = f" {error_json['error']}"
                     except Exception:
                         pass
-
                     
                     raise RuntimeError(
                         f"Server error ({response.status_code}): {response.reason_phrase}.{error_details} "
                         "This may be due to temporary service issues."
                     )
-                elif response.status_code == 400:
+
+                try:
+                    text = response.text
+                except UnicodeDecodeError:
+                    text = response.content.decode("utf-8", errors="replace")
+                response_preview = self._truncate_response(text)
+
+                if response.status_code == 400:
                     raise ValueError(
                         f"Invalid request ({response.status_code}): {response.reason_phrase}. "
                         f"Response: {response_preview}"
@@ -475,7 +480,6 @@ class LingoDotDevEngine:
             response = await self._client.post(url, json={"text": text})
 
             if not response.is_success:
-                response_preview = self._truncate_response(response.text)
                 if 500 <= response.status_code < 600:
                     error_details = ""
                     try:
@@ -489,6 +493,13 @@ class LingoDotDevEngine:
                         f"Server error ({response.status_code}): {response.reason_phrase}.{error_details} "
                         "This may be due to temporary service issues."
                     )
+                
+                try:
+                    text = response.text
+                except UnicodeDecodeError:
+                    text = response.content.decode("utf-8", errors="replace")
+                response_preview = self._truncate_response(text)
+                
                 raise RuntimeError(
                     f"Error recognizing locale ({response.status_code}): {response.reason_phrase}. "
                     f"Response: {response_preview}"
