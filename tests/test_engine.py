@@ -6,6 +6,8 @@ import pytest
 import asyncio
 from unittest.mock import Mock, patch, AsyncMock
 
+import httpx
+
 from lingodotdev import LingoDotDevEngine
 from lingodotdev.engine import EngineConfig
 
@@ -53,6 +55,215 @@ class TestEngineConfig:
 
         with pytest.raises(ValueError):
             EngineConfig(api_key="test_key", ideal_batch_item_size=3000)
+
+
+class TestErrorHandling:
+    """Test error handling utilities for non-JSON responses (e.g., 502 HTML errors)"""
+
+    def test_truncate_response_short_text(self):
+        """Test that short responses are not truncated"""
+        short_text = "Short error message"
+        result = LingoDotDevEngine._truncate_response(short_text)
+        assert result == short_text
+
+    def test_truncate_response_long_text(self):
+        """Test that long responses are truncated with ellipsis"""
+        long_text = "x" * 300
+        result = LingoDotDevEngine._truncate_response(long_text)
+        assert len(result) == 203  # 200 chars + "..."
+        assert result.endswith("...")
+
+    def test_truncate_response_custom_max_length(self):
+        """Test truncation with custom max length"""
+        text = "x" * 100
+        result = LingoDotDevEngine._truncate_response(text, max_length=50)
+        assert len(result) == 53  # 50 chars + "..."
+        assert result.endswith("...")
+
+    def test_truncate_response_exact_length(self):
+        """Test text exactly at max length is not truncated"""
+        text = "x" * 200
+        result = LingoDotDevEngine._truncate_response(text, max_length=200)
+        assert result == text
+        assert not result.endswith("...")
+
+    def test_safe_parse_json_valid_json(self):
+        """Test parsing valid JSON response"""
+        mock_response = Mock(spec=httpx.Response)
+        mock_response.json.return_value = {"data": "test"}
+
+        result = LingoDotDevEngine._safe_parse_json(mock_response)
+        assert result == {"data": "test"}
+
+    def test_safe_parse_json_html_response(self):
+        """Test handling HTML response (like 502 error page)"""
+        import json as json_module
+
+        # Use a large HTML body (>200 chars) to test truncation
+        html_body = """<!DOCTYPE html>
+<html>
+<head><title>502 Bad Gateway</title></head>
+<body>
+<center><h1>502 Bad Gateway</h1></center>
+<p>The server encountered a temporary error and could not complete your request.</p>
+<p>Please try again in a few moments. If the problem persists, contact support.</p>
+<hr><center>nginx/1.18.0 (Ubuntu)</center>
+</body>
+</html>"""
+        mock_response = Mock(spec=httpx.Response)
+        mock_response.json.side_effect = json_module.JSONDecodeError(
+            "Expecting value", html_body, 0
+        )
+        mock_response.text = html_body
+        mock_response.status_code = 502
+
+        with pytest.raises(RuntimeError) as exc_info:
+            LingoDotDevEngine._safe_parse_json(mock_response)
+
+        error_msg = str(exc_info.value)
+        assert "Failed to parse API response as JSON" in error_msg
+        assert "status 502" in error_msg
+        assert "gateway or proxy error" in error_msg
+        # Verify HTML is truncated (original is ~400 chars, should be truncated to 200 + ...)
+        assert "..." in error_msg
+        assert len(error_msg) < len(html_body) + 150
+
+    def test_safe_parse_json_empty_response(self):
+        """Test handling empty response body"""
+        import json as json_module
+
+        mock_response = Mock(spec=httpx.Response)
+        mock_response.json.side_effect = json_module.JSONDecodeError(
+            "Expecting value", "", 0
+        )
+        mock_response.text = ""
+        mock_response.status_code = 500
+
+        with pytest.raises(RuntimeError) as exc_info:
+            LingoDotDevEngine._safe_parse_json(mock_response)
+
+        assert "status 500" in str(exc_info.value)
+
+    def test_safe_parse_json_malformed_json(self):
+        """Test handling malformed JSON response"""
+        import json as json_module
+
+        mock_response = Mock(spec=httpx.Response)
+        mock_response.json.side_effect = json_module.JSONDecodeError(
+            "Expecting value", '{"data": incomplete', 8
+        )
+        mock_response.text = '{"data": incomplete'
+        mock_response.status_code = 200
+
+        with pytest.raises(RuntimeError) as exc_info:
+            LingoDotDevEngine._safe_parse_json(mock_response)
+
+        assert "Failed to parse API response as JSON" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+class TestErrorHandlingIntegration:
+    """Integration tests for error handling with mocked HTTP responses"""
+
+    def setup_method(self):
+        """Set up test fixtures"""
+        self.config = {"api_key": "test_api_key", "api_url": "https://api.test.com"}
+        self.engine = LingoDotDevEngine(self.config)
+
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_localize_chunk_502_html_response(self, mock_post):
+        """Test that 502 with HTML body raises clean RuntimeError"""
+        html_body = "<html><body><h1>502 Bad Gateway</h1></body></html>"
+        mock_response = Mock()
+        mock_response.is_success = False
+        mock_response.status_code = 502
+        mock_response.reason_phrase = "Bad Gateway"
+        mock_response.text = html_body
+        mock_post.return_value = mock_response
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await self.engine._localize_chunk(
+                "en", "es", {"data": {"key": "value"}}, "workflow_id", False
+            )
+
+        error_msg = str(exc_info.value)
+        assert "Server error (502)" in error_msg
+        assert "Bad Gateway" in error_msg
+        assert "temporary service issues" in error_msg
+
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_localize_chunk_success_but_html_response(self, mock_post):
+        """Test handling when server returns 200 but with HTML body (edge case)"""
+        import json as json_module
+
+        mock_response = Mock()
+        mock_response.is_success = True
+        mock_response.status_code = 200
+        mock_response.json.side_effect = json_module.JSONDecodeError(
+            "Expecting value", "<html>Unexpected HTML</html>", 0
+        )
+        mock_response.text = "<html>Unexpected HTML</html>"
+        mock_post.return_value = mock_response
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await self.engine._localize_chunk(
+                "en", "es", {"data": {"key": "value"}}, "workflow_id", False
+            )
+
+        assert "Failed to parse API response as JSON" in str(exc_info.value)
+
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_recognize_locale_502_html_response(self, mock_post):
+        """Test recognize_locale handles 502 HTML gracefully"""
+        mock_response = Mock()
+        mock_response.is_success = False
+        mock_response.status_code = 502
+        mock_response.reason_phrase = "Bad Gateway"
+        mock_response.text = "<html><body>502 Bad Gateway</body></html>"
+        mock_post.return_value = mock_response
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await self.engine.recognize_locale("Hello world")
+
+        error_msg = str(exc_info.value)
+        assert "Server error (502)" in error_msg
+
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_whoami_502_html_response(self, mock_post):
+        """Test whoami handles 502 HTML gracefully"""
+        mock_response = Mock()
+        mock_response.is_success = False
+        mock_response.status_code = 502
+        mock_response.reason_phrase = "Bad Gateway"
+        mock_response.text = "<html><body>502 Bad Gateway</body></html>"
+        mock_post.return_value = mock_response
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await self.engine.whoami()
+
+        error_msg = str(exc_info.value)
+        assert "Server error (502)" in error_msg
+
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_error_message_truncation_in_api_call(self, mock_post):
+        """Test that large HTML error pages are truncated in error messages"""
+        large_html = "<html>" + "x" * 1000 + "</html>"
+        mock_response = Mock()
+        mock_response.is_success = False
+        mock_response.status_code = 503
+        mock_response.reason_phrase = "Service Unavailable"
+        mock_response.text = large_html
+        mock_post.return_value = mock_response
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await self.engine._localize_chunk(
+                "en", "es", {"data": {"key": "value"}}, "workflow_id", False
+            )
+
+        error_msg = str(exc_info.value)
+        # Error message should be much shorter than the full HTML
+        assert len(error_msg) < 500
+        assert "..." in error_msg  # Truncation indicator
 
 
 @pytest.mark.asyncio
@@ -164,6 +375,7 @@ class TestLingoDotDevEngine:
         mock_response.is_success = False
         mock_response.status_code = 400
         mock_response.reason_phrase = "Bad Request"
+        mock_response.text = "Invalid parameters"
         mock_post.return_value = mock_response
 
         with pytest.raises(ValueError, match="Invalid request \\(400\\)"):
@@ -284,6 +496,7 @@ class TestLingoDotDevEngine:
         mock_response.is_success = False
         mock_response.status_code = 500
         mock_response.reason_phrase = "Internal Server Error"
+        mock_response.text = "Server error details"
         mock_post.return_value = mock_response
 
         with pytest.raises(RuntimeError, match="Server error"):
@@ -324,6 +537,7 @@ class TestLingoDotDevEngine:
         mock_response.is_success = False
         mock_response.status_code = 500
         mock_response.reason_phrase = "Internal Server Error"
+        mock_response.text = "Server error details"
         mock_post.return_value = mock_response
 
         with pytest.raises(RuntimeError, match="Server error"):
