@@ -15,8 +15,19 @@ pytestmark = pytest.mark.skipif(
     reason="Integration tests require LINGODOTDEV_API_KEY environment variable",
 )
 
+# Check if running in CI environment
+IS_CI = (
+    os.getenv("CI", "false").lower() == "true"
+    or os.getenv("GITHUB_ACTIONS") is not None
+)
+
 
 @pytest.mark.asyncio
+@pytest.mark.xfail(
+    IS_CI,
+    reason="Real API tests may fail in CI due to intermittent server errors (502)",
+    strict=False,
+)
 class TestRealAPIIntegration:
     """Integration tests against the real API"""
 
