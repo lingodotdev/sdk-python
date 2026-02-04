@@ -5,6 +5,7 @@ LingoDotDevEngine implementation for Python SDK - Async version with httpx
 # mypy: disable-error-code=unreachable
 
 import asyncio
+import json
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urljoin
 
@@ -79,6 +80,36 @@ class LingoDotDevEngine:
         """Close the httpx client"""
         if self._client and not self._client.is_closed:
             await self._client.aclose()
+
+    @staticmethod
+    def _truncate_response(text: str, max_length: int = 200) -> str:
+        """Truncate response text for error messages"""
+        if len(text) > max_length:
+            return text[:max_length] + "..."
+        return text
+
+    @staticmethod
+    def _safe_parse_json(response: httpx.Response) -> Dict[str, Any]:
+        """
+        Safely parse JSON response, handling HTML error pages gracefully.
+
+        Args:
+            response: The httpx response object
+
+        Returns:
+            Parsed JSON as a dictionary
+
+        Raises:
+            RuntimeError: If the response cannot be parsed as JSON
+        """
+        try:
+            return response.json()
+        except json.JSONDecodeError:
+            preview = LingoDotDevEngine._truncate_response(response.text)
+            raise RuntimeError(
+                f"Failed to parse API response as JSON (status {response.status_code}). "
+                f"This may indicate a gateway or proxy error. Response: {preview}"
+            )
 
     async def _localize_raw(
         self,
@@ -184,19 +215,23 @@ class LingoDotDevEngine:
             response = await self._client.post(url, json=request_data)
 
             if not response.is_success:
+                response_preview = self._truncate_response(response.text)
                 if 500 <= response.status_code < 600:
                     raise RuntimeError(
                         f"Server error ({response.status_code}): {response.reason_phrase}. "
-                        f"{response.text}. This may be due to temporary service issues."
+                        f"This may be due to temporary service issues. Response: {response_preview}"
                     )
                 elif response.status_code == 400:
                     raise ValueError(
-                        f"Invalid request ({response.status_code}): {response.reason_phrase}"
+                        f"Invalid request ({response.status_code}): {response.reason_phrase}. "
+                        f"Response: {response_preview}"
                     )
                 else:
-                    raise RuntimeError(response.text)
+                    raise RuntimeError(
+                        f"Request failed ({response.status_code}): {response_preview}"
+                    )
 
-            json_response = response.json()
+            json_response = self._safe_parse_json(response)
 
             # Handle streaming errors
             if not json_response.get("data") and json_response.get("error"):
@@ -426,16 +461,18 @@ class LingoDotDevEngine:
             response = await self._client.post(url, json={"text": text})
 
             if not response.is_success:
+                response_preview = self._truncate_response(response.text)
                 if 500 <= response.status_code < 600:
                     raise RuntimeError(
                         f"Server error ({response.status_code}): {response.reason_phrase}. "
-                        "This may be due to temporary service issues."
+                        f"This may be due to temporary service issues. Response: {response_preview}"
                     )
                 raise RuntimeError(
-                    f"Error recognizing locale: {response.reason_phrase}"
+                    f"Error recognizing locale ({response.status_code}): {response.reason_phrase}. "
+                    f"Response: {response_preview}"
                 )
 
-            json_response = response.json()
+            json_response = self._safe_parse_json(response)
             return json_response.get("locale") or ""
 
         except httpx.RequestError as e:
@@ -456,14 +493,15 @@ class LingoDotDevEngine:
             response = await self._client.post(url)
 
             if response.is_success:
-                payload = response.json()
+                payload = self._safe_parse_json(response)
                 if payload.get("email"):
                     return {"email": payload["email"], "id": payload["id"]}
 
             if 500 <= response.status_code < 600:
+                response_preview = self._truncate_response(response.text)
                 raise RuntimeError(
                     f"Server error ({response.status_code}): {response.reason_phrase}. "
-                    "This may be due to temporary service issues."
+                    f"This may be due to temporary service issues. Response: {response_preview}"
                 )
 
             return None
