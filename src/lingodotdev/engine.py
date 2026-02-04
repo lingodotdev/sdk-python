@@ -217,9 +217,18 @@ class LingoDotDevEngine:
             if not response.is_success:
                 response_preview = self._truncate_response(response.text)
                 if 500 <= response.status_code < 600:
+                    error_details = ""
+                    try:
+                        error_json = response.json()
+                        if isinstance(error_json, dict) and "error" in error_json:
+                            error_details = f" {error_json['error']}"
+                    except Exception:
+                        pass
+
                     raise RuntimeError(
-                        f"Server error ({response.status_code}): {response.reason_phrase}. "
-                        f"This may be due to temporary service issues. Response: {response_preview}"
+                    raise RuntimeError(
+                        f"Server error ({response.status_code}): {response.reason_phrase}.{error_details} "
+                        "This may be due to temporary service issues."
                     )
                 elif response.status_code == 400:
                     raise ValueError(
@@ -463,9 +472,18 @@ class LingoDotDevEngine:
             if not response.is_success:
                 response_preview = self._truncate_response(response.text)
                 if 500 <= response.status_code < 600:
+                    error_details = ""
+                    try:
+                        error_json = response.json()
+                        if isinstance(error_json, dict) and "error" in error_json:
+                            error_details = f" {error_json['error']}"
+                    except Exception:
+                        pass
+
                     raise RuntimeError(
-                        f"Server error ({response.status_code}): {response.reason_phrase}. "
-                        f"This may be due to temporary service issues. Response: {response_preview}"
+                    raise RuntimeError(
+                        f"Server error ({response.status_code}): {response.reason_phrase}.{error_details} "
+                        "This may be due to temporary service issues."
                     )
                 raise RuntimeError(
                     f"Error recognizing locale ({response.status_code}): {response.reason_phrase}. "
@@ -498,10 +516,17 @@ class LingoDotDevEngine:
                     return {"email": payload["email"], "id": payload["id"]}
 
             if 500 <= response.status_code < 600:
-                response_preview = self._truncate_response(response.text)
+                error_details = ""
+                try:
+                    error_json = response.json()
+                    if isinstance(error_json, dict) and "error" in error_json:
+                        error_details = f" {error_json['error']}"
+                except Exception:
+                    pass
+
                 raise RuntimeError(
-                    f"Server error ({response.status_code}): {response.reason_phrase}. "
-                    f"This may be due to temporary service issues. Response: {response_preview}"
+                    f"Server error ({response.status_code}): {response.reason_phrase}.{error_details} "
+                    "This may be due to temporary service issues."
                 )
 
             return None
