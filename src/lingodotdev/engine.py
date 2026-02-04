@@ -104,12 +104,17 @@ class LingoDotDevEngine:
         """
         try:
             return response.json()
-        except json.JSONDecodeError:
-            preview = LingoDotDevEngine._truncate_response(response.text)
+        except (json.JSONDecodeError, UnicodeDecodeError) as err:
+            try:
+                text = response.text
+            except UnicodeDecodeError:
+                text = response.content.decode("utf-8", errors="replace")
+            
+            preview = LingoDotDevEngine._truncate_response(text)
             raise RuntimeError(
                 f"Failed to parse API response as JSON (status {response.status_code}). "
                 f"This may indicate a gateway or proxy error. Response: {preview}"
-            )
+            ) from err
 
     async def _localize_raw(
         self,
@@ -225,7 +230,7 @@ class LingoDotDevEngine:
                     except Exception:
                         pass
 
-                    raise RuntimeError(
+                    
                     raise RuntimeError(
                         f"Server error ({response.status_code}): {response.reason_phrase}.{error_details} "
                         "This may be due to temporary service issues."
@@ -480,7 +485,6 @@ class LingoDotDevEngine:
                     except Exception:
                         pass
 
-                    raise RuntimeError(
                     raise RuntimeError(
                         f"Server error ({response.status_code}): {response.reason_phrase}.{error_details} "
                         "This may be due to temporary service issues."
