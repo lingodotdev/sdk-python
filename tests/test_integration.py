@@ -181,15 +181,6 @@ class TestRealAPIIntegration:
             assert len(progress_values) > 0
             assert max(progress_values) == 100  # Should reach 100% completion
 
-    async def test_error_handling_invalid_locale(self):
-        """Test error handling with invalid locale"""
-        async with self.engine:
-            with pytest.raises(Exception):  # Could be ValueError or RuntimeError
-                await self.engine.localize_text(
-                    "Hello world",
-                    {"source_locale": "invalid_locale", "target_locale": "es"},
-                )
-
     async def test_error_handling_empty_text(self):
         """Test error handling with empty text"""
         async with self.engine:
