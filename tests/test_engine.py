@@ -652,6 +652,11 @@ class TestVNextEngine:
         self.config = {"api_key": "test_api_key", "engine_id": "my-engine-id"}
         self.engine = LingoDotDevEngine(self.config)
 
+    def teardown_method(self):
+        """Clean up engine client"""
+        if self.engine._client and not self.engine._client.is_closed:
+            asyncio.get_event_loop().run_until_complete(self.engine.close())
+
     def test_engine_id_empty_string_treated_as_none(self):
         """Test that empty engine_id is treated as None"""
         engine = LingoDotDevEngine({"api_key": "key", "engine_id": ""})

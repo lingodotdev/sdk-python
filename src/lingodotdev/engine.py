@@ -34,15 +34,15 @@ class EngineConfig(BaseModel):
     @validator("api_url", pre=True, always=True)
     @classmethod
     def validate_api_url(cls, v: Optional[str], values: Dict[str, Any]) -> str:
-        if v is None or v == "https://engine.lingo.dev":
-            engine_id = values.get("engine_id")
-            if engine_id:
-                return "https://api.lingo.dev"
+        default_url = "https://engine.lingo.dev"
         if v is None:
-            return "https://engine.lingo.dev"
+            v = default_url
         if not v.startswith(("http://", "https://")):
             raise ValueError("API URL must be a valid HTTP/HTTPS URL")
-        return v.rstrip("/")
+        v = v.rstrip("/")
+        if v == default_url and values.get("engine_id"):
+            return "https://api.lingo.dev"
+        return v
 
 
 class LocalizationParams(BaseModel):
@@ -600,6 +600,7 @@ class LingoDotDevEngine:
             source_locale: Source language code (optional, auto-detected if None)
             api_url: API endpoint URL
             fast: Enable fast mode for quicker translations
+            engine_id: Optional engine ID for vNext API.
 
         Returns:
             Translated content (same type as input)
@@ -619,7 +620,7 @@ class LingoDotDevEngine:
                 "es"
             )
         """
-        config: Dict[str, Any] = {
+        config = {
             "api_key": api_key,
             "api_url": api_url,
         }
@@ -662,6 +663,7 @@ class LingoDotDevEngine:
             source_locale: Source language code (optional, auto-detected if None)
             api_url: API endpoint URL
             fast: Enable fast mode for quicker translations
+            engine_id: Optional engine ID for vNext API.
 
         Returns:
             List of translated content (one for each target locale)
@@ -674,7 +676,7 @@ class LingoDotDevEngine:
             )
             # Results: ["Hola mundo", "Bonjour le monde", "Hallo Welt"]
         """
-        config: Dict[str, Any] = {
+        config = {
             "api_key": api_key,
             "api_url": api_url,
         }
