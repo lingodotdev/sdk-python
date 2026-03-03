@@ -23,6 +23,14 @@ class EngineConfig(BaseModel):
     batch_size: int = Field(default=25, ge=1, le=250)
     ideal_batch_item_size: int = Field(default=250, ge=1, le=2500)
 
+    @validator("engine_id", pre=True, always=True)
+    @classmethod
+    def validate_engine_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip()
+        return v if v else None
+
     @validator("api_url", pre=True, always=True)
     @classmethod
     def validate_api_url(cls, v: Optional[str], values: Dict[str, Any]) -> str:
@@ -34,7 +42,7 @@ class EngineConfig(BaseModel):
             return "https://engine.lingo.dev"
         if not v.startswith(("http://", "https://")):
             raise ValueError("API URL must be a valid HTTP/HTTPS URL")
-        return v
+        return v.rstrip("/")
 
 
 class LocalizationParams(BaseModel):

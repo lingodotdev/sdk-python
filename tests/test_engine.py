@@ -652,6 +652,37 @@ class TestVNextEngine:
         self.config = {"api_key": "test_api_key", "engine_id": "my-engine-id"}
         self.engine = LingoDotDevEngine(self.config)
 
+    def test_engine_id_empty_string_treated_as_none(self):
+        """Test that empty engine_id is treated as None"""
+        engine = LingoDotDevEngine({"api_key": "key", "engine_id": ""})
+        assert engine.config.engine_id is None
+        assert engine._is_vnext is False
+        assert engine.config.api_url == "https://engine.lingo.dev"
+
+    def test_engine_id_whitespace_treated_as_none(self):
+        """Test that whitespace-only engine_id is treated as None"""
+        engine = LingoDotDevEngine({"api_key": "key", "engine_id": "  "})
+        assert engine.config.engine_id is None
+        assert engine._is_vnext is False
+        assert engine.config.api_url == "https://engine.lingo.dev"
+
+    def test_engine_id_stripped(self):
+        """Test that engine_id is stripped of whitespace"""
+        engine = LingoDotDevEngine({"api_key": "key", "engine_id": " eng_123 "})
+        assert engine.config.engine_id == "eng_123"
+        assert engine._is_vnext is True
+
+    def test_api_url_trailing_slash_stripped(self):
+        """Test that trailing slash is stripped from api_url"""
+        engine = LingoDotDevEngine(
+            {
+                "api_key": "key",
+                "engine_id": "eng",
+                "api_url": "https://custom.api.com/",
+            }
+        )
+        assert engine.config.api_url == "https://custom.api.com"
+
     def test_engine_id_default_api_url(self):
         """Test that engine_id switches default api_url to api.lingo.dev"""
         assert self.engine.config.api_url == "https://api.lingo.dev"
@@ -659,11 +690,13 @@ class TestVNextEngine:
 
     def test_engine_id_with_explicit_api_url(self):
         """Test that explicit api_url is preserved with engine_id"""
-        engine = LingoDotDevEngine({
-            "api_key": "key",
-            "engine_id": "eng",
-            "api_url": "https://custom.api.com",
-        })
+        engine = LingoDotDevEngine(
+            {
+                "api_key": "key",
+                "engine_id": "eng",
+                "api_url": "https://custom.api.com",
+            }
+        )
         assert engine.config.api_url == "https://custom.api.com"
 
     def test_is_vnext_true(self):
@@ -672,7 +705,9 @@ class TestVNextEngine:
 
     def test_is_vnext_false_without_engine_id(self):
         """Test _is_vnext is False without engine_id"""
-        engine = LingoDotDevEngine({"api_key": "key", "api_url": "https://api.test.com"})
+        engine = LingoDotDevEngine(
+            {"api_key": "key", "api_url": "https://api.test.com"}
+        )
         assert engine._is_vnext is False
 
     def test_session_id_generated(self):
@@ -690,7 +725,9 @@ class TestVNextEngine:
 
     async def test_classic_ensure_client_uses_bearer(self):
         """Test that classic engine uses Bearer auth header"""
-        engine = LingoDotDevEngine({"api_key": "test_key", "api_url": "https://api.test.com"})
+        engine = LingoDotDevEngine(
+            {"api_key": "test_key", "api_url": "https://api.test.com"}
+        )
         await engine._ensure_client()
         assert engine._client is not None
         assert engine._client.headers.get("authorization") == "Bearer test_key"
@@ -706,7 +743,11 @@ class TestVNextEngine:
         mock_post.return_value = mock_response
 
         await self.engine._localize_chunk(
-            "en", "es", {"data": {"key": "value"}, "reference": {"es": {"key": "ref"}}}, "wf", True
+            "en",
+            "es",
+            {"data": {"key": "value"}, "reference": {"es": {"key": "ref"}}},
+            "wf",
+            True,
         )
 
         call_args = mock_post.call_args
