@@ -641,3 +641,134 @@ class TestIntegration:
         assert request_data["locale"]["target"] == "es"
         assert request_data["params"]["fast"] is True
         assert request_data["data"] == {"greeting": "hello", "farewell": "goodbye"}
+
+
+@pytest.mark.asyncio
+class TestVNextEngine:
+    """Test vNext / Engine ID specific behavior"""
+
+    def setup_method(self):
+        """Set up test fixtures"""
+        self.config = {"api_key": "test_api_key", "engine_id": "my-engine-id"}
+        self.engine = LingoDotDevEngine(self.config)
+
+    def test_engine_id_default_api_url(self):
+        """Test that engine_id switches default api_url to api.lingo.dev"""
+        assert self.engine.config.api_url == "https://api.lingo.dev"
+        assert self.engine.config.engine_id == "my-engine-id"
+
+    def test_engine_id_with_explicit_api_url(self):
+        """Test that explicit api_url is preserved with engine_id"""
+        engine = LingoDotDevEngine({
+            "api_key": "key",
+            "engine_id": "eng",
+            "api_url": "https://custom.api.com",
+        })
+        assert engine.config.api_url == "https://custom.api.com"
+
+    def test_is_vnext_true(self):
+        """Test _is_vnext is True with engine_id"""
+        assert self.engine._is_vnext is True
+
+    def test_is_vnext_false_without_engine_id(self):
+        """Test _is_vnext is False without engine_id"""
+        engine = LingoDotDevEngine({"api_key": "key", "api_url": "https://api.test.com"})
+        assert engine._is_vnext is False
+
+    def test_session_id_generated(self):
+        """Test that session_id is generated on init"""
+        assert self.engine._session_id
+        assert isinstance(self.engine._session_id, str)
+
+    async def test_vnext_ensure_client_uses_x_api_key(self):
+        """Test that vNext engine uses X-API-Key header"""
+        await self.engine._ensure_client()
+        assert self.engine._client is not None
+        assert self.engine._client.headers.get("x-api-key") == "test_api_key"
+        assert "authorization" not in self.engine._client.headers
+        await self.engine.close()
+
+    async def test_classic_ensure_client_uses_bearer(self):
+        """Test that classic engine uses Bearer auth header"""
+        engine = LingoDotDevEngine({"api_key": "test_key", "api_url": "https://api.test.com"})
+        await engine._ensure_client()
+        assert engine._client is not None
+        assert engine._client.headers.get("authorization") == "Bearer test_key"
+        assert "x-api-key" not in engine._client.headers
+        await engine.close()
+
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_vnext_localize_chunk_url_and_body(self, mock_post):
+        """Test vNext localize chunk uses correct URL and body format"""
+        mock_response = Mock()
+        mock_response.is_success = True
+        mock_response.json.return_value = {"data": {"key": "translated"}}
+        mock_post.return_value = mock_response
+
+        await self.engine._localize_chunk(
+            "en", "es", {"data": {"key": "value"}, "reference": {"es": {"key": "ref"}}}, "wf", True
+        )
+
+        call_args = mock_post.call_args
+        url = call_args[0][0]
+        assert url == "https://api.lingo.dev/process/my-engine-id/localize"
+
+        body = call_args[1]["json"]
+        assert body["sourceLocale"] == "en"
+        assert body["targetLocale"] == "es"
+        assert body["params"] == {"fast": True}
+        assert body["data"] == {"key": "value"}
+        assert body["sessionId"] == self.engine._session_id
+        assert body["reference"] == {"es": {"key": "ref"}}
+
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_vnext_recognize_locale_url(self, mock_post):
+        """Test vNext recognize_locale uses correct URL"""
+        mock_response = Mock()
+        mock_response.is_success = True
+        mock_response.json.return_value = {"locale": "es"}
+        mock_post.return_value = mock_response
+
+        await self.engine.recognize_locale("Hola mundo")
+
+        url = mock_post.call_args[0][0]
+        assert url == "https://api.lingo.dev/process/recognize"
+
+    @patch("lingodotdev.engine.httpx.AsyncClient.get")
+    async def test_vnext_whoami(self, mock_get):
+        """Test vNext whoami calls GET /users/me"""
+        mock_response = Mock()
+        mock_response.is_success = True
+        mock_response.json.return_value = {"id": "usr_abc", "email": "user@example.com"}
+        mock_get.return_value = mock_response
+
+        result = await self.engine.whoami()
+
+        assert result == {"email": "user@example.com", "id": "usr_abc"}
+        url = mock_get.call_args[0][0]
+        assert url == "https://api.lingo.dev/users/me"
+
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_vnext_full_localization_workflow(self, mock_post):
+        """Test full vNext localization workflow via localize_object"""
+        mock_response = Mock()
+        mock_response.is_success = True
+        mock_response.json.return_value = {"data": {"greeting": "hola"}}
+        mock_post.return_value = mock_response
+
+        result = await self.engine.localize_object(
+            {"greeting": "hello"},
+            {"source_locale": "en", "target_locale": "es", "fast": True},
+        )
+
+        assert result == {"greeting": "hola"}
+
+        call_args = mock_post.call_args
+        url = call_args[0][0]
+        assert url == "https://api.lingo.dev/process/my-engine-id/localize"
+
+        body = call_args[1]["json"]
+        assert body["sourceLocale"] == "en"
+        assert body["targetLocale"] == "es"
+        assert "sessionId" in body
+        assert "locale" not in body  # classic format should NOT be present

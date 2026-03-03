@@ -18,13 +18,20 @@ class EngineConfig(BaseModel):
     """Configuration for the LingoDotDevEngine"""
 
     api_key: str
+    engine_id: Optional[str] = None
     api_url: str = "https://engine.lingo.dev"
     batch_size: int = Field(default=25, ge=1, le=250)
     ideal_batch_item_size: int = Field(default=250, ge=1, le=2500)
 
-    @validator("api_url")
+    @validator("api_url", pre=True, always=True)
     @classmethod
-    def validate_api_url(cls, v: str) -> str:
+    def validate_api_url(cls, v: Optional[str], values: Dict[str, Any]) -> str:
+        if v is None or v == "https://engine.lingo.dev":
+            engine_id = values.get("engine_id")
+            if engine_id:
+                return "https://api.lingo.dev"
+        if v is None:
+            return "https://engine.lingo.dev"
         if not v.startswith(("http://", "https://")):
             raise ValueError("API URL must be a valid HTTP/HTTPS URL")
         return v
@@ -55,6 +62,11 @@ class LingoDotDevEngine:
         """
         self.config = EngineConfig(**config)
         self._client: Optional[httpx.AsyncClient] = None
+        self._session_id: str = generate()
+
+    @property
+    def _is_vnext(self) -> bool:
+        return self.config.engine_id is not None
 
     async def __aenter__(self):
         """Async context manager entry"""
@@ -68,10 +80,14 @@ class LingoDotDevEngine:
     async def _ensure_client(self):
         """Ensure the httpx client is initialized"""
         if self._client is None or self._client.is_closed:
+            if self._is_vnext:
+                auth_header = {"X-API-Key": self.config.api_key}
+            else:
+                auth_header = {"Authorization": f"Bearer {self.config.api_key}"}
             self._client = httpx.AsyncClient(
                 headers={
                     "Content-Type": "application/json; charset=utf-8",
-                    "Authorization": f"Bearer {self.config.api_key}",
+                    **auth_header,
                 },
                 timeout=60.0,
             )
@@ -200,16 +216,27 @@ class LingoDotDevEngine:
         """
         await self._ensure_client()
         assert self._client is not None  # Type guard for mypy
-        url = urljoin(self.config.api_url, "/i18n")
 
-        request_data = {
-            "params": {"workflowId": workflow_id, "fast": fast},
-            "locale": {"source": source_locale, "target": target_locale},
-            "data": payload["data"],
-        }
-
-        if payload.get("reference"):
-            request_data["reference"] = payload["reference"]
+        if self._is_vnext:
+            url = f"{self.config.api_url}/process/{self.config.engine_id}/localize"
+            request_data: Dict[str, Any] = {
+                "params": {"fast": fast},
+                "sourceLocale": source_locale,
+                "targetLocale": target_locale,
+                "data": payload["data"],
+                "sessionId": self._session_id,
+            }
+            if payload.get("reference"):
+                request_data["reference"] = payload["reference"]
+        else:
+            url = urljoin(self.config.api_url, "/i18n")
+            request_data = {
+                "params": {"workflowId": workflow_id, "fast": fast},
+                "locale": {"source": source_locale, "target": target_locale},
+                "data": payload["data"],
+            }
+            if payload.get("reference"):
+                request_data["reference"] = payload["reference"]
 
         try:
             response = await self._client.post(url, json=request_data)
@@ -455,7 +482,11 @@ class LingoDotDevEngine:
 
         await self._ensure_client()
         assert self._client is not None  # Type guard for mypy
-        url = urljoin(self.config.api_url, "/recognize")
+
+        if self._is_vnext:
+            url = f"{self.config.api_url}/process/recognize"
+        else:
+            url = urljoin(self.config.api_url, "/recognize")
 
         try:
             response = await self._client.post(url, json={"text": text})
@@ -487,10 +518,17 @@ class LingoDotDevEngine:
         """
         await self._ensure_client()
         assert self._client is not None  # Type guard for mypy
-        url = urljoin(self.config.api_url, "/whoami")
+
+        if self._is_vnext:
+            url = f"{self.config.api_url}/users/me"
+        else:
+            url = urljoin(self.config.api_url, "/whoami")
 
         try:
-            response = await self._client.post(url)
+            if self._is_vnext:
+                response = await self._client.get(url)
+            else:
+                response = await self._client.post(url)
 
             if response.is_success:
                 payload = self._safe_parse_json(response)
@@ -541,6 +579,7 @@ class LingoDotDevEngine:
         source_locale: Optional[str] = None,
         api_url: str = "https://engine.lingo.dev",
         fast: bool = True,
+        engine_id: Optional[str] = None,
     ) -> Any:
         """
         Quick one-off translation without manual context management.
@@ -572,10 +611,12 @@ class LingoDotDevEngine:
                 "es"
             )
         """
-        config = {
+        config: Dict[str, Any] = {
             "api_key": api_key,
             "api_url": api_url,
         }
+        if engine_id:
+            config["engine_id"] = engine_id
 
         async with cls(config) as engine:
             params = {
@@ -600,6 +641,7 @@ class LingoDotDevEngine:
         source_locale: Optional[str] = None,
         api_url: str = "https://engine.lingo.dev",
         fast: bool = True,
+        engine_id: Optional[str] = None,
     ) -> List[Any]:
         """
         Quick batch translation to multiple target locales.
@@ -624,10 +666,12 @@ class LingoDotDevEngine:
             )
             # Results: ["Hola mundo", "Bonjour le monde", "Hallo Welt"]
         """
-        config = {
+        config: Dict[str, Any] = {
             "api_key": api_key,
             "api_url": api_url,
         }
+        if engine_id:
+            config["engine_id"] = engine_id
 
         async with cls(config) as engine:
             if isinstance(content, str):
