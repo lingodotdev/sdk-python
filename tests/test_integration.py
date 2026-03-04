@@ -34,13 +34,17 @@ class TestRealAPIIntegration:
     def setup_method(self):
         """Set up test fixtures"""
         api_key = os.getenv("LINGODOTDEV_API_KEY")
+        engine_id = os.getenv("LINGODOTDEV_ENGINE_ID")
         if not api_key:
             pytest.skip("No API key provided")
+        if not engine_id:
+            pytest.skip("No engine ID provided")
 
         self.engine = LingoDotDevEngine(
             {
                 "api_key": api_key,
-                "api_url": os.getenv("LINGODOTDEV_API_URL", "https://engine.lingo.dev"),
+                "engine_id": engine_id,
+                "api_url": os.getenv("LINGODOTDEV_API_URL", "https://api.lingo.dev"),
             }
         )
 
@@ -270,7 +274,11 @@ class TestMockedIntegration:
     def setup_method(self):
         """Set up test fixtures"""
         self.engine = LingoDotDevEngine(
-            {"api_key": "test_api_key", "api_url": "https://api.test.com"}
+            {
+                "api_key": "test_api_key",
+                "engine_id": "test-engine",
+                "api_url": "https://api.test.com",
+            }
         )
 
     @patch("lingodotdev.engine.httpx.AsyncClient.post")
@@ -318,8 +326,8 @@ class TestMockedIntegration:
         assert request_data["reference"] == reference
 
     @patch("lingodotdev.engine.httpx.AsyncClient.post")
-    async def test_workflow_id_consistency(self, mock_post):
-        """Test that workflow ID is consistent across chunks"""
+    async def test_session_id_consistency(self, mock_post):
+        """Test that session ID is consistent across chunks"""
         mock_response = Mock()
         mock_response.is_success = True
         mock_response.json.return_value = {"data": {"key": "value"}}
@@ -332,16 +340,16 @@ class TestMockedIntegration:
             large_payload, {"source_locale": "en", "target_locale": "es"}
         )
 
-        # Extract workflow IDs from all calls
-        workflow_ids = []
+        # Extract session IDs from all calls
+        session_ids = []
         for call in mock_post.call_args_list:
             request_data = call[1]["json"]
-            workflow_id = request_data["params"]["workflowId"]
-            workflow_ids.append(workflow_id)
+            session_id = request_data["sessionId"]
+            session_ids.append(session_id)
 
-        # All workflow IDs should be the same
-        assert len(set(workflow_ids)) == 1
-        assert len(workflow_ids[0]) > 0  # Should be a non-empty string
+        # All session IDs should be the same
+        assert len(set(session_ids)) == 1
+        assert len(session_ids[0]) > 0  # Should be a non-empty string
 
     @patch("lingodotdev.engine.httpx.AsyncClient.post")
     async def test_concurrent_chunk_processing(self, mock_post):

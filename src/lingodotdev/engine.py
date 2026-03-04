@@ -2,12 +2,9 @@
 LingoDotDevEngine implementation for Python SDK - Async version with httpx
 """
 
-# mypy: disable-error-code=unreachable
-
 import asyncio
 import json
 from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import urljoin
 
 import httpx
 from nanoid import generate
@@ -18,31 +15,24 @@ class EngineConfig(BaseModel):
     """Configuration for the LingoDotDevEngine"""
 
     api_key: str
-    engine_id: Optional[str] = None
-    api_url: str = "https://engine.lingo.dev"
+    engine_id: str
+    api_url: str = "https://api.lingo.dev"
     batch_size: int = Field(default=25, ge=1, le=250)
     ideal_batch_item_size: int = Field(default=250, ge=1, le=2500)
 
     @validator("engine_id", pre=True, always=True)
     @classmethod
-    def validate_engine_id(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return None
-        v = v.strip()
-        return v if v else None
+    def validate_engine_id(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("engine_id is required and cannot be empty")
+        return v.strip()
 
     @validator("api_url", pre=True, always=True)
     @classmethod
-    def validate_api_url(cls, v: Optional[str], values: Dict[str, Any]) -> str:
-        default_url = "https://engine.lingo.dev"
-        if v is None:
-            v = default_url
+    def validate_api_url(cls, v: str) -> str:
         if not v.startswith(("http://", "https://")):
             raise ValueError("API URL must be a valid HTTP/HTTPS URL")
-        v = v.rstrip("/")
-        if v == default_url and values.get("engine_id"):
-            return "https://api.lingo.dev"
-        return v
+        return v.rstrip("/")
 
 
 class LocalizationParams(BaseModel):
@@ -72,10 +62,6 @@ class LingoDotDevEngine:
         self._client: Optional[httpx.AsyncClient] = None
         self._session_id: str = generate()
 
-    @property
-    def _is_vnext(self) -> bool:
-        return self.config.engine_id is not None
-
     async def __aenter__(self):
         """Async context manager entry"""
         await self._ensure_client()
@@ -88,14 +74,10 @@ class LingoDotDevEngine:
     async def _ensure_client(self):
         """Ensure the httpx client is initialized"""
         if self._client is None or self._client.is_closed:
-            if self._is_vnext:
-                auth_header = {"X-API-Key": self.config.api_key}
-            else:
-                auth_header = {"Authorization": f"Bearer {self.config.api_key}"}
             self._client = httpx.AsyncClient(
                 headers={
                     "Content-Type": "application/json; charset=utf-8",
-                    **auth_header,
+                    "X-API-Key": self.config.api_key,
                 },
                 timeout=60.0,
             )
@@ -158,7 +140,6 @@ class LingoDotDevEngine:
         """
         await self._ensure_client()
         chunked_payload = self._extract_payload_chunks(payload)
-        workflow_id = generate()
 
         if concurrent and not progress_callback:
             # Process chunks concurrently for better performance
@@ -168,7 +149,6 @@ class LingoDotDevEngine:
                     params.source_locale,
                     params.target_locale,
                     {"data": chunk, "reference": params.reference},
-                    workflow_id,
                     params.fast or False,
                 )
                 tasks.append(task)
@@ -184,7 +164,6 @@ class LingoDotDevEngine:
                     params.source_locale,
                     params.target_locale,
                     {"data": chunk, "reference": params.reference},
-                    workflow_id,
                     params.fast or False,
                 )
 
@@ -206,7 +185,6 @@ class LingoDotDevEngine:
         source_locale: Optional[str],
         target_locale: str,
         payload: Dict[str, Any],
-        workflow_id: str,
         fast: bool,
     ) -> Dict[str, str]:
         """
@@ -216,7 +194,6 @@ class LingoDotDevEngine:
             source_locale: Source locale
             target_locale: Target locale
             payload: Payload containing the chunk to be localized
-            workflow_id: Workflow ID for tracking
             fast: Whether to use fast mode
 
         Returns:
@@ -225,26 +202,16 @@ class LingoDotDevEngine:
         await self._ensure_client()
         assert self._client is not None  # Type guard for mypy
 
-        if self._is_vnext:
-            url = f"{self.config.api_url}/process/{self.config.engine_id}/localize"
-            request_data: Dict[str, Any] = {
-                "params": {"fast": fast},
-                "sourceLocale": source_locale,
-                "targetLocale": target_locale,
-                "data": payload["data"],
-                "sessionId": self._session_id,
-            }
-            if payload.get("reference"):
-                request_data["reference"] = payload["reference"]
-        else:
-            url = urljoin(self.config.api_url, "/i18n")
-            request_data = {
-                "params": {"workflowId": workflow_id, "fast": fast},
-                "locale": {"source": source_locale, "target": target_locale},
-                "data": payload["data"],
-            }
-            if payload.get("reference"):
-                request_data["reference"] = payload["reference"]
+        url = f"{self.config.api_url}/process/{self.config.engine_id}/localize"
+        request_data: Dict[str, Any] = {
+            "params": {"fast": fast},
+            "sourceLocale": source_locale,
+            "targetLocale": target_locale,
+            "data": payload["data"],
+            "sessionId": self._session_id,
+        }
+        if payload.get("reference"):
+            request_data["reference"] = payload["reference"]
 
         try:
             response = await self._client.post(url, json=request_data)
@@ -491,10 +458,7 @@ class LingoDotDevEngine:
         await self._ensure_client()
         assert self._client is not None  # Type guard for mypy
 
-        if self._is_vnext:
-            url = f"{self.config.api_url}/process/recognize"
-        else:
-            url = urljoin(self.config.api_url, "/recognize")
+        url = f"{self.config.api_url}/process/recognize"
 
         try:
             response = await self._client.post(url, json={"text": text})
@@ -527,16 +491,10 @@ class LingoDotDevEngine:
         await self._ensure_client()
         assert self._client is not None  # Type guard for mypy
 
-        if self._is_vnext:
-            url = f"{self.config.api_url}/users/me"
-        else:
-            url = urljoin(self.config.api_url, "/whoami")
+        url = f"{self.config.api_url}/users/me"
 
         try:
-            if self._is_vnext:
-                response = await self._client.get(url)
-            else:
-                response = await self._client.post(url)
+            response = await self._client.get(url)
 
             if response.is_success:
                 payload = self._safe_parse_json(response)
@@ -583,11 +541,11 @@ class LingoDotDevEngine:
         cls,
         content: Any,
         api_key: str,
+        engine_id: str,
         target_locale: str,
         source_locale: Optional[str] = None,
-        api_url: str = "https://engine.lingo.dev",
+        api_url: str = "https://api.lingo.dev",
         fast: bool = True,
-        engine_id: Optional[str] = None,
     ) -> Any:
         """
         Quick one-off translation without manual context management.
@@ -596,11 +554,11 @@ class LingoDotDevEngine:
         Args:
             content: Text string or dict to translate
             api_key: Your Lingo.dev API key
+            engine_id: Engine ID for the API
             target_locale: Target language code (e.g., 'es', 'fr')
             source_locale: Source language code (optional, auto-detected if None)
             api_url: API endpoint URL
             fast: Enable fast mode for quicker translations
-            engine_id: Optional engine ID for vNext API.
 
         Returns:
             Translated content (same type as input)
@@ -610,6 +568,7 @@ class LingoDotDevEngine:
             result = await LingoDotDevEngine.quick_translate(
                 "Hello world",
                 "your-api-key",
+                "your-engine-id",
                 "es"
             )
 
@@ -617,15 +576,15 @@ class LingoDotDevEngine:
             result = await LingoDotDevEngine.quick_translate(
                 {"greeting": "Hello", "farewell": "Goodbye"},
                 "your-api-key",
+                "your-engine-id",
                 "es"
             )
         """
         config = {
             "api_key": api_key,
+            "engine_id": engine_id,
             "api_url": api_url,
         }
-        if engine_id:
-            config["engine_id"] = engine_id
 
         async with cls(config) as engine:
             params = {
@@ -646,11 +605,11 @@ class LingoDotDevEngine:
         cls,
         content: Any,
         api_key: str,
+        engine_id: str,
         target_locales: List[str],
         source_locale: Optional[str] = None,
-        api_url: str = "https://engine.lingo.dev",
+        api_url: str = "https://api.lingo.dev",
         fast: bool = True,
-        engine_id: Optional[str] = None,
     ) -> List[Any]:
         """
         Quick batch translation to multiple target locales.
@@ -659,11 +618,11 @@ class LingoDotDevEngine:
         Args:
             content: Text string or dict to translate
             api_key: Your Lingo.dev API key
+            engine_id: Engine ID for the API
             target_locales: List of target language codes (e.g., ['es', 'fr', 'de'])
             source_locale: Source language code (optional, auto-detected if None)
             api_url: API endpoint URL
             fast: Enable fast mode for quicker translations
-            engine_id: Optional engine ID for vNext API.
 
         Returns:
             List of translated content (one for each target locale)
@@ -672,16 +631,16 @@ class LingoDotDevEngine:
             results = await LingoDotDevEngine.quick_batch_translate(
                 "Hello world",
                 "your-api-key",
+                "your-engine-id",
                 ["es", "fr", "de"]
             )
             # Results: ["Hola mundo", "Bonjour le monde", "Hallo Welt"]
         """
         config = {
             "api_key": api_key,
+            "engine_id": engine_id,
             "api_url": api_url,
         }
-        if engine_id:
-            config["engine_id"] = engine_id
 
         async with cls(config) as engine:
             if isinstance(content, str):
