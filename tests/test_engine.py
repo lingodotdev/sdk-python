@@ -83,7 +83,9 @@ class TestEngineConfig:
             EngineConfig(api_key="test_key", engine_id="eng", ideal_batch_item_size=0)
 
         with pytest.raises(ValueError):
-            EngineConfig(api_key="test_key", engine_id="eng", ideal_batch_item_size=3000)
+            EngineConfig(
+                api_key="test_key", engine_id="eng", ideal_batch_item_size=3000
+            )
 
 
 class TestErrorHandling:

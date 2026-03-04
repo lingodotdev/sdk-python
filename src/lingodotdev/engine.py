@@ -2,6 +2,8 @@
 LingoDotDevEngine implementation for Python SDK - Async version with httpx
 """
 
+# mypy: disable-error-code=unreachable
+
 import asyncio
 import json
 from typing import Any, Callable, Dict, List, Optional
@@ -20,14 +22,14 @@ class EngineConfig(BaseModel):
     batch_size: int = Field(default=25, ge=1, le=250)
     ideal_batch_item_size: int = Field(default=250, ge=1, le=2500)
 
-    @validator("engine_id", pre=True, always=True)
+    @validator("engine_id")
     @classmethod
     def validate_engine_id(cls, v: str) -> str:
         if not v.strip():
             raise ValueError("engine_id is required and cannot be empty")
         return v.strip()
 
-    @validator("api_url", pre=True, always=True)
+    @validator("api_url")
     @classmethod
     def validate_api_url(cls, v: str) -> str:
         if not v.startswith(("http://", "https://")):
