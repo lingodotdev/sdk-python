@@ -37,20 +37,20 @@ class TestEngineConfig:
         assert config.batch_size == 25
         assert config.ideal_batch_item_size == 250
 
-    def test_engine_id_required(self):
-        """Test that engine_id is required"""
-        with pytest.raises(Exception, match="engine_id"):
-            EngineConfig(api_key="test_key")
+    def test_engine_id_optional(self):
+        """Test that engine_id is optional and defaults to None"""
+        config = EngineConfig(api_key="test_key")
+        assert config.engine_id is None
 
-    def test_engine_id_empty_string_rejected(self):
-        """Test that empty engine_id is rejected"""
-        with pytest.raises(ValueError, match="engine_id is required"):
-            EngineConfig(api_key="test_key", engine_id="")
+    def test_engine_id_empty_string_becomes_none(self):
+        """Test that empty engine_id becomes None"""
+        config = EngineConfig(api_key="test_key", engine_id="")
+        assert config.engine_id is None
 
-    def test_engine_id_whitespace_rejected(self):
-        """Test that whitespace-only engine_id is rejected"""
-        with pytest.raises(ValueError, match="engine_id is required"):
-            EngineConfig(api_key="test_key", engine_id="  ")
+    def test_engine_id_whitespace_becomes_none(self):
+        """Test that whitespace-only engine_id becomes None"""
+        config = EngineConfig(api_key="test_key", engine_id="  ")
+        assert config.engine_id is None
 
     def test_engine_id_stripped(self):
         """Test that engine_id is stripped of whitespace"""
@@ -702,7 +702,7 @@ class TestIntegration:
 
         call_args = mock_post.call_args
         url = call_args[0][0]
-        assert url == "https://api.lingo.dev/process/my-engine-id/localize"
+        assert url == "https://api.lingo.dev/process/localize"
 
         body = call_args[1]["json"]
         assert body["sourceLocale"] == "en"
@@ -710,6 +710,7 @@ class TestIntegration:
         assert body["params"] == {"fast": True}
         assert body["data"] == {"key": "value"}
         assert body["sessionId"] == self.engine._session_id
+        assert body["engineId"] == "my-engine-id"
         assert body["reference"] == {"es": {"key": "ref"}}
 
     @patch("lingodotdev.engine.httpx.AsyncClient.post")
@@ -756,9 +757,34 @@ class TestIntegration:
 
         call_args = mock_post.call_args
         url = call_args[0][0]
-        assert url == "https://api.lingo.dev/process/my-engine-id/localize"
+        assert url == "https://api.lingo.dev/process/localize"
 
         body = call_args[1]["json"]
         assert body["sourceLocale"] == "en"
         assert body["targetLocale"] == "es"
+        assert body["engineId"] == "my-engine-id"
         assert "sessionId" in body
+
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_localize_without_engine_id(self, mock_post):
+        """Test localization without engine_id omits engineId from body"""
+        engine = LingoDotDevEngine({"api_key": "test_api_key"})
+
+        mock_response = Mock()
+        mock_response.is_success = True
+        mock_response.json.return_value = {"data": {"greeting": "hola"}}
+        mock_post.return_value = mock_response
+
+        result = await engine.localize_object(
+            {"greeting": "hello"},
+            {"source_locale": "en", "target_locale": "es", "fast": True},
+        )
+
+        assert result == {"greeting": "hola"}
+
+        call_args = mock_post.call_args
+        url = call_args[0][0]
+        assert url == "https://api.lingo.dev/process/localize"
+
+        body = call_args[1]["json"]
+        assert "engineId" not in body

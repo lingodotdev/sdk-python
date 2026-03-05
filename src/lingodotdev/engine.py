@@ -17,17 +17,20 @@ class EngineConfig(BaseModel):
     """Configuration for the LingoDotDevEngine"""
 
     api_key: str
-    engine_id: str
+    engine_id: Optional[str] = None
     api_url: str = "https://api.lingo.dev"
     batch_size: int = Field(default=25, ge=1, le=250)
     ideal_batch_item_size: int = Field(default=250, ge=1, le=2500)
 
-    @validator("engine_id")
+    @validator("engine_id", pre=True, always=True)
     @classmethod
-    def validate_engine_id(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("engine_id is required and cannot be empty")
-        return v.strip()
+    def validate_engine_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = v.strip()
+        if not stripped:
+            return None
+        return stripped
 
     @validator("api_url")
     @classmethod
@@ -204,7 +207,7 @@ class LingoDotDevEngine:
         await self._ensure_client()
         assert self._client is not None  # Type guard for mypy
 
-        url = f"{self.config.api_url}/process/{self.config.engine_id}/localize"
+        url = f"{self.config.api_url}/process/localize"
         request_data: Dict[str, Any] = {
             "params": {"fast": fast},
             "sourceLocale": source_locale,
@@ -212,6 +215,8 @@ class LingoDotDevEngine:
             "data": payload["data"],
             "sessionId": self._session_id,
         }
+        if self.config.engine_id:
+            request_data["engineId"] = self.config.engine_id
         if payload.get("reference"):
             request_data["reference"] = payload["reference"]
 
@@ -543,9 +548,9 @@ class LingoDotDevEngine:
         cls,
         content: Any,
         api_key: str,
-        engine_id: str,
         target_locale: str,
         source_locale: Optional[str] = None,
+        engine_id: Optional[str] = None,
         api_url: str = "https://api.lingo.dev",
         fast: bool = True,
     ) -> Any:
@@ -556,9 +561,9 @@ class LingoDotDevEngine:
         Args:
             content: Text string or dict to translate
             api_key: Your Lingo.dev API key
-            engine_id: Engine ID for the API
             target_locale: Target language code (e.g., 'es', 'fr')
             source_locale: Source language code (optional, auto-detected if None)
+            engine_id: Optional engine ID for the API
             api_url: API endpoint URL
             fast: Enable fast mode for quicker translations
 
@@ -582,11 +587,12 @@ class LingoDotDevEngine:
                 "es"
             )
         """
-        config = {
+        config: Dict[str, Any] = {
             "api_key": api_key,
-            "engine_id": engine_id,
             "api_url": api_url,
         }
+        if engine_id:
+            config["engine_id"] = engine_id
 
         async with cls(config) as engine:
             params = {
@@ -607,9 +613,9 @@ class LingoDotDevEngine:
         cls,
         content: Any,
         api_key: str,
-        engine_id: str,
         target_locales: List[str],
         source_locale: Optional[str] = None,
+        engine_id: Optional[str] = None,
         api_url: str = "https://api.lingo.dev",
         fast: bool = True,
     ) -> List[Any]:
@@ -620,9 +626,9 @@ class LingoDotDevEngine:
         Args:
             content: Text string or dict to translate
             api_key: Your Lingo.dev API key
-            engine_id: Engine ID for the API
             target_locales: List of target language codes (e.g., ['es', 'fr', 'de'])
             source_locale: Source language code (optional, auto-detected if None)
+            engine_id: Optional engine ID for the API
             api_url: API endpoint URL
             fast: Enable fast mode for quicker translations
 
@@ -633,16 +639,16 @@ class LingoDotDevEngine:
             results = await LingoDotDevEngine.quick_batch_translate(
                 "Hello world",
                 "your-api-key",
-                "your-engine-id",
                 ["es", "fr", "de"]
             )
             # Results: ["Hola mundo", "Bonjour le monde", "Hallo Welt"]
         """
-        config = {
+        config: Dict[str, Any] = {
             "api_key": api_key,
-            "engine_id": engine_id,
             "api_url": api_url,
         }
+        if engine_id:
+            config["engine_id"] = engine_id
 
         async with cls(config) as engine:
             if isinstance(content, str):

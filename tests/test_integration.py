@@ -34,19 +34,18 @@ class TestRealAPIIntegration:
     def setup_method(self):
         """Set up test fixtures"""
         api_key = os.getenv("LINGODOTDEV_API_KEY")
-        engine_id = os.getenv("LINGODOTDEV_ENGINE_ID")
         if not api_key:
             pytest.skip("No API key provided")
-        if not engine_id:
-            pytest.skip("No engine ID provided")
 
-        self.engine = LingoDotDevEngine(
-            {
-                "api_key": api_key,
-                "engine_id": engine_id,
-                "api_url": os.getenv("LINGODOTDEV_API_URL", "https://api.lingo.dev"),
-            }
-        )
+        config = {
+            "api_key": api_key,
+            "api_url": os.getenv("LINGODOTDEV_API_URL", "https://api.lingo.dev"),
+        }
+        engine_id = os.getenv("LINGODOTDEV_ENGINE_ID")
+        if engine_id:
+            config["engine_id"] = engine_id
+
+        self.engine = LingoDotDevEngine(config)
 
     async def test_localize_text_real_api(self):
         """Test text localization against real API"""

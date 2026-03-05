@@ -8,7 +8,6 @@ A powerful async-first localization engine that supports various content types i
 - 🔀 **Concurrent processing** for dramatically faster bulk translations
 - 🎯 **Multiple content types**: text, objects, chat messages, and more
 - 🌐 **Auto-detection** of source languages
-- ⚡ **Fast mode** for quick translations
 - 🔧 **Flexible configuration** with progress callbacks
 - 📦 **Context manager** support for proper resource management
 
@@ -56,7 +55,7 @@ from lingodotdev import LingoDotDevEngine
 async def main():
     config = {
         "api_key": "your-api-key",
-        "engine_id": "your-engine-id",
+        "engine_id": "your-engine-id",  # Optional
     }
 
     async with LingoDotDevEngine(config) as engine:
@@ -164,7 +163,7 @@ async def detection_example():
 ```python
 config = {
     "api_key": "your-api-key",              # Required: Your API key
-    "engine_id": "your-engine-id",          # Required: Your engine ID
+    "engine_id": "your-engine-id",          # Optional: Your engine ID
     "api_url": "https://api.lingo.dev",     # Optional: API endpoint
     "batch_size": 25,                       # Optional: Items per batch (1-250)
     "ideal_batch_item_size": 250            # Optional: Target words per batch (1-2500)
@@ -176,7 +175,6 @@ config = {
 ### Translation Parameters
 - **source_locale**: Source language code (auto-detected if None)
 - **target_locale**: Target language code (required)
-- **fast**: Enable fast mode for quicker translations
 - **reference**: Reference translations for context
 - **concurrent**: Process chunks concurrently (faster, but no progress callbacks)
 
