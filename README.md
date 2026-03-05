@@ -222,8 +222,8 @@ The async version is a drop-in replacement with these changes:
 - `whoami()` - Get API account info
 
 ### Convenience Methods
-- `quick_translate(content, api_key, engine_id, target_locale, ...)` - One-off translation
-- `quick_batch_translate(content, api_key, engine_id, target_locales, ...)` - Batch translation
+- `quick_translate(content, api_key, target_locale, ...)` - One-off translation
+- `quick_batch_translate(content, api_key, target_locales, ...)` - Batch translation
 
 ## 📄 License
 
