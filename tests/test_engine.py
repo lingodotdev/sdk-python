@@ -19,42 +19,73 @@ class TestEngineConfig:
         """Test valid configuration"""
         config = EngineConfig(
             api_key="test_key",
+            engine_id="my-engine",
             api_url="https://api.test.com",
             batch_size=50,
             ideal_batch_item_size=500,
         )
         assert config.api_key == "test_key"
+        assert config.engine_id == "my-engine"
         assert config.api_url == "https://api.test.com"
         assert config.batch_size == 50
         assert config.ideal_batch_item_size == 500
 
     def test_default_values(self):
         """Test default configuration values"""
-        config = EngineConfig(api_key="test_key")
-        assert config.api_url == "https://engine.lingo.dev"
+        config = EngineConfig(api_key="test_key", engine_id="my-engine")
+        assert config.api_url == "https://api.lingo.dev"
         assert config.batch_size == 25
         assert config.ideal_batch_item_size == 250
+
+    def test_engine_id_optional(self):
+        """Test that engine_id is optional and defaults to None"""
+        config = EngineConfig(api_key="test_key")
+        assert config.engine_id is None
+
+    def test_engine_id_empty_string_becomes_none(self):
+        """Test that empty engine_id becomes None"""
+        config = EngineConfig(api_key="test_key", engine_id="")
+        assert config.engine_id is None
+
+    def test_engine_id_whitespace_becomes_none(self):
+        """Test that whitespace-only engine_id becomes None"""
+        config = EngineConfig(api_key="test_key", engine_id="  ")
+        assert config.engine_id is None
+
+    def test_engine_id_stripped(self):
+        """Test that engine_id is stripped of whitespace"""
+        config = EngineConfig(api_key="test_key", engine_id=" eng_123 ")
+        assert config.engine_id == "eng_123"
 
     def test_invalid_api_url(self):
         """Test invalid API URL validation"""
         with pytest.raises(ValueError, match="API URL must be a valid HTTP/HTTPS URL"):
-            EngineConfig(api_key="test_key", api_url="invalid_url")
+            EngineConfig(api_key="test_key", engine_id="eng", api_url="invalid_url")
+
+    def test_api_url_trailing_slash_stripped(self):
+        """Test that trailing slash is stripped from api_url"""
+        config = EngineConfig(
+            api_key="test_key", engine_id="eng", api_url="https://custom.api.com/"
+        )
+        assert config.api_url == "https://custom.api.com"
 
     def test_invalid_batch_size(self):
         """Test invalid batch size validation"""
         with pytest.raises(ValueError):
-            EngineConfig(api_key="test_key", batch_size=0)
+            EngineConfig(api_key="test_key", engine_id="eng", batch_size=0)
 
         with pytest.raises(ValueError):
-            EngineConfig(api_key="test_key", batch_size=300)
+            EngineConfig(api_key="test_key", engine_id="eng", batch_size=300)
 
     def test_invalid_ideal_batch_item_size(self):
         """Test invalid ideal batch item size validation"""
         with pytest.raises(ValueError):
-            EngineConfig(api_key="test_key", ideal_batch_item_size=0)
+            EngineConfig(api_key="test_key", engine_id="eng", ideal_batch_item_size=0)
 
         with pytest.raises(ValueError):
-            EngineConfig(api_key="test_key", ideal_batch_item_size=3000)
+            EngineConfig(
+                api_key="test_key", engine_id="eng", ideal_batch_item_size=3000
+            )
 
 
 class TestErrorHandling:
@@ -167,7 +198,11 @@ class TestErrorHandlingIntegration:
 
     def setup_method(self):
         """Set up test fixtures"""
-        self.config = {"api_key": "test_api_key", "api_url": "https://api.test.com"}
+        self.config = {
+            "api_key": "test_api_key",
+            "engine_id": "test-engine",
+            "api_url": "https://api.test.com",
+        }
         self.engine = LingoDotDevEngine(self.config)
 
     @patch("lingodotdev.engine.httpx.AsyncClient.post")
@@ -183,7 +218,7 @@ class TestErrorHandlingIntegration:
 
         with pytest.raises(RuntimeError) as exc_info:
             await self.engine._localize_chunk(
-                "en", "es", {"data": {"key": "value"}}, "workflow_id", False
+                "en", "es", {"data": {"key": "value"}}, False
             )
 
         error_msg = str(exc_info.value)
@@ -207,7 +242,7 @@ class TestErrorHandlingIntegration:
 
         with pytest.raises(RuntimeError) as exc_info:
             await self.engine._localize_chunk(
-                "en", "es", {"data": {"key": "value"}}, "workflow_id", False
+                "en", "es", {"data": {"key": "value"}}, False
             )
 
         assert "Failed to parse API response as JSON" in str(exc_info.value)
@@ -228,15 +263,15 @@ class TestErrorHandlingIntegration:
         error_msg = str(exc_info.value)
         assert "Server error (502)" in error_msg
 
-    @patch("lingodotdev.engine.httpx.AsyncClient.post")
-    async def test_whoami_502_html_response(self, mock_post):
+    @patch("lingodotdev.engine.httpx.AsyncClient.get")
+    async def test_whoami_502_html_response(self, mock_get):
         """Test whoami handles 502 HTML gracefully"""
         mock_response = Mock()
         mock_response.is_success = False
         mock_response.status_code = 502
         mock_response.reason_phrase = "Bad Gateway"
         mock_response.text = "<html><body>502 Bad Gateway</body></html>"
-        mock_post.return_value = mock_response
+        mock_get.return_value = mock_response
 
         with pytest.raises(RuntimeError) as exc_info:
             await self.engine.whoami()
@@ -257,7 +292,7 @@ class TestErrorHandlingIntegration:
 
         with pytest.raises(RuntimeError) as exc_info:
             await self.engine._localize_chunk(
-                "en", "es", {"data": {"key": "value"}}, "workflow_id", False
+                "en", "es", {"data": {"key": "value"}}, False
             )
 
         error_msg = str(exc_info.value)
@@ -274,6 +309,7 @@ class TestLingoDotDevEngine:
         """Set up test fixtures"""
         self.config = {
             "api_key": "test_api_key",
+            "engine_id": "test-engine",
             "api_url": "https://api.test.com",
             "batch_size": 10,
             "ideal_batch_item_size": 100,
@@ -347,7 +383,7 @@ class TestLingoDotDevEngine:
         mock_post.return_value = mock_response
 
         result = await self.engine._localize_chunk(
-            "en", "es", {"data": {"key": "value"}}, "workflow_id", False
+            "en", "es", {"data": {"key": "value"}}, False
         )
 
         assert result == {"key": "translated_value"}
@@ -365,7 +401,7 @@ class TestLingoDotDevEngine:
 
         with pytest.raises(RuntimeError, match="Server error"):
             await self.engine._localize_chunk(
-                "en", "es", {"data": {"key": "value"}}, "workflow_id", False
+                "en", "es", {"data": {"key": "value"}}, False
             )
 
     @patch("lingodotdev.engine.httpx.AsyncClient.post")
@@ -380,7 +416,7 @@ class TestLingoDotDevEngine:
 
         with pytest.raises(ValueError, match="Invalid request \\(400\\)"):
             await self.engine._localize_chunk(
-                "en", "es", {"data": {"key": "value"}}, "workflow_id", False
+                "en", "es", {"data": {"key": "value"}}, False
             )
 
     @patch("lingodotdev.engine.httpx.AsyncClient.post")
@@ -393,7 +429,7 @@ class TestLingoDotDevEngine:
 
         with pytest.raises(RuntimeError, match="Streaming error occurred"):
             await self.engine._localize_chunk(
-                "en", "es", {"data": {"key": "value"}}, "workflow_id", False
+                "en", "es", {"data": {"key": "value"}}, False
             )
 
     @patch("lingodotdev.engine.LingoDotDevEngine._localize_raw")
@@ -502,8 +538,8 @@ class TestLingoDotDevEngine:
         with pytest.raises(RuntimeError, match="Server error"):
             await self.engine.recognize_locale("Hello world")
 
-    @patch("lingodotdev.engine.httpx.AsyncClient.post")
-    async def test_whoami_success(self, mock_post):
+    @patch("lingodotdev.engine.httpx.AsyncClient.get")
+    async def test_whoami_success(self, mock_get):
         """Test successful whoami request"""
         mock_response = Mock()
         mock_response.is_success = True
@@ -511,46 +547,46 @@ class TestLingoDotDevEngine:
             "email": "test@example.com",
             "id": "user_123",
         }
-        mock_post.return_value = mock_response
+        mock_get.return_value = mock_response
 
         result = await self.engine.whoami()
 
         assert result == {"email": "test@example.com", "id": "user_123"}
-        mock_post.assert_called_once()
+        mock_get.assert_called_once()
 
-    @patch("lingodotdev.engine.httpx.AsyncClient.post")
-    async def test_whoami_unauthenticated(self, mock_post):
+    @patch("lingodotdev.engine.httpx.AsyncClient.get")
+    async def test_whoami_unauthenticated(self, mock_get):
         """Test whoami request when unauthenticated"""
         mock_response = Mock()
         mock_response.is_success = False
         mock_response.status_code = 401
-        mock_post.return_value = mock_response
+        mock_get.return_value = mock_response
 
         result = await self.engine.whoami()
 
         assert result is None
 
-    @patch("lingodotdev.engine.httpx.AsyncClient.post")
-    async def test_whoami_server_error(self, mock_post):
+    @patch("lingodotdev.engine.httpx.AsyncClient.get")
+    async def test_whoami_server_error(self, mock_get):
         """Test whoami request with server error"""
         mock_response = Mock()
         mock_response.is_success = False
         mock_response.status_code = 500
         mock_response.reason_phrase = "Internal Server Error"
         mock_response.text = "Server error details"
-        mock_post.return_value = mock_response
+        mock_get.return_value = mock_response
 
         with pytest.raises(RuntimeError, match="Server error"):
             await self.engine.whoami()
 
-    @patch("lingodotdev.engine.httpx.AsyncClient.post")
-    async def test_whoami_no_email(self, mock_post):
+    @patch("lingodotdev.engine.httpx.AsyncClient.get")
+    async def test_whoami_no_email(self, mock_get):
         """Test whoami request with no email in response"""
         mock_response = Mock()
         mock_response.is_success = True
         mock_response.status_code = 200
         mock_response.json.return_value = {}
-        mock_post.return_value = mock_response
+        mock_get.return_value = mock_response
 
         result = await self.engine.whoami()
 
@@ -609,35 +645,146 @@ class TestIntegration:
 
     def setup_method(self):
         """Set up test fixtures"""
-        self.config = {"api_key": "test_api_key", "api_url": "https://api.test.com"}
+        self.config = {
+            "api_key": "test_api_key",
+            "engine_id": "my-engine-id",
+        }
         self.engine = LingoDotDevEngine(self.config)
+
+    def teardown_method(self):
+        """Clean up engine client"""
+        if self.engine._client and not self.engine._client.is_closed:
+            asyncio.get_event_loop().run_until_complete(self.engine.close())
+
+    def test_default_api_url(self):
+        """Test that default api_url is api.lingo.dev"""
+        assert self.engine.config.api_url == "https://api.lingo.dev"
+        assert self.engine.config.engine_id == "my-engine-id"
+
+    def test_explicit_api_url_preserved(self):
+        """Test that explicit api_url is preserved"""
+        engine = LingoDotDevEngine(
+            {
+                "api_key": "key",
+                "engine_id": "eng",
+                "api_url": "https://custom.api.com",
+            }
+        )
+        assert engine.config.api_url == "https://custom.api.com"
+
+    def test_session_id_generated(self):
+        """Test that session_id is generated on init"""
+        assert self.engine._session_id
+        assert isinstance(self.engine._session_id, str)
+
+    async def test_ensure_client_uses_x_api_key(self):
+        """Test that engine uses X-API-Key header"""
+        await self.engine._ensure_client()
+        assert self.engine._client is not None
+        assert self.engine._client.headers.get("x-api-key") == "test_api_key"
+        assert "authorization" not in self.engine._client.headers
+        await self.engine.close()
+
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_localize_chunk_url_and_body(self, mock_post):
+        """Test localize chunk uses correct URL and body format"""
+        mock_response = Mock()
+        mock_response.is_success = True
+        mock_response.json.return_value = {"data": {"key": "translated"}}
+        mock_post.return_value = mock_response
+
+        await self.engine._localize_chunk(
+            "en",
+            "es",
+            {"data": {"key": "value"}, "reference": {"es": {"key": "ref"}}},
+            True,
+        )
+
+        call_args = mock_post.call_args
+        url = call_args[0][0]
+        assert url == "https://api.lingo.dev/process/localize"
+
+        body = call_args[1]["json"]
+        assert body["sourceLocale"] == "en"
+        assert body["targetLocale"] == "es"
+        assert body["params"] == {"fast": True}
+        assert body["data"] == {"key": "value"}
+        assert body["sessionId"] == self.engine._session_id
+        assert body["engineId"] == "my-engine-id"
+        assert body["reference"] == {"es": {"key": "ref"}}
+
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_recognize_locale_url(self, mock_post):
+        """Test recognize_locale uses correct URL"""
+        mock_response = Mock()
+        mock_response.is_success = True
+        mock_response.json.return_value = {"locale": "es"}
+        mock_post.return_value = mock_response
+
+        await self.engine.recognize_locale("Hola mundo")
+
+        url = mock_post.call_args[0][0]
+        assert url == "https://api.lingo.dev/process/recognize"
+
+    @patch("lingodotdev.engine.httpx.AsyncClient.get")
+    async def test_whoami(self, mock_get):
+        """Test whoami calls GET /users/me"""
+        mock_response = Mock()
+        mock_response.is_success = True
+        mock_response.json.return_value = {"id": "usr_abc", "email": "user@example.com"}
+        mock_get.return_value = mock_response
+
+        result = await self.engine.whoami()
+
+        assert result == {"email": "user@example.com", "id": "usr_abc"}
+        url = mock_get.call_args[0][0]
+        assert url == "https://api.lingo.dev/users/me"
 
     @patch("lingodotdev.engine.httpx.AsyncClient.post")
     async def test_full_localization_workflow(self, mock_post):
-        """Test full localization workflow"""
-        # Mock the API response
+        """Test full localization workflow via localize_object"""
         mock_response = Mock()
         mock_response.is_success = True
-        mock_response.json.return_value = {
-            "data": {"greeting": "hola", "farewell": "adiós"}
-        }
+        mock_response.json.return_value = {"data": {"greeting": "hola"}}
         mock_post.return_value = mock_response
 
-        # Test object localization
         result = await self.engine.localize_object(
-            {"greeting": "hello", "farewell": "goodbye"},
+            {"greeting": "hello"},
             {"source_locale": "en", "target_locale": "es", "fast": True},
         )
 
-        assert result == {"greeting": "hola", "farewell": "adiós"}
+        assert result == {"greeting": "hola"}
 
-        # Verify the API was called with correct parameters
-        mock_post.assert_called_once()
         call_args = mock_post.call_args
-        assert call_args[0][0].endswith("/i18n")
+        url = call_args[0][0]
+        assert url == "https://api.lingo.dev/process/localize"
 
-        request_data = call_args[1]["json"]
-        assert request_data["locale"]["source"] == "en"
-        assert request_data["locale"]["target"] == "es"
-        assert request_data["params"]["fast"] is True
-        assert request_data["data"] == {"greeting": "hello", "farewell": "goodbye"}
+        body = call_args[1]["json"]
+        assert body["sourceLocale"] == "en"
+        assert body["targetLocale"] == "es"
+        assert body["engineId"] == "my-engine-id"
+        assert "sessionId" in body
+
+    @patch("lingodotdev.engine.httpx.AsyncClient.post")
+    async def test_localize_without_engine_id(self, mock_post):
+        """Test localization without engine_id omits engineId from body"""
+        engine = LingoDotDevEngine({"api_key": "test_api_key"})
+
+        mock_response = Mock()
+        mock_response.is_success = True
+        mock_response.json.return_value = {"data": {"greeting": "hola"}}
+        mock_post.return_value = mock_response
+
+        result = await engine.localize_object(
+            {"greeting": "hello"},
+            {"source_locale": "en", "target_locale": "es", "fast": True},
+        )
+
+        assert result == {"greeting": "hola"}
+
+        call_args = mock_post.call_args
+        url = call_args[0][0]
+        assert url == "https://api.lingo.dev/process/localize"
+
+        body = call_args[1]["json"]
+        assert "engineId" not in body

@@ -7,7 +7,6 @@ LingoDotDevEngine implementation for Python SDK - Async version with httpx
 import asyncio
 import json
 from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import urljoin
 
 import httpx
 from nanoid import generate
@@ -18,16 +17,27 @@ class EngineConfig(BaseModel):
     """Configuration for the LingoDotDevEngine"""
 
     api_key: str
-    api_url: str = "https://engine.lingo.dev"
+    engine_id: Optional[str] = None
+    api_url: str = "https://api.lingo.dev"
     batch_size: int = Field(default=25, ge=1, le=250)
     ideal_batch_item_size: int = Field(default=250, ge=1, le=2500)
+
+    @validator("engine_id", pre=True, always=True)
+    @classmethod
+    def validate_engine_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = v.strip()
+        if not stripped:
+            return None
+        return stripped
 
     @validator("api_url")
     @classmethod
     def validate_api_url(cls, v: str) -> str:
         if not v.startswith(("http://", "https://")):
             raise ValueError("API URL must be a valid HTTP/HTTPS URL")
-        return v
+        return v.rstrip("/")
 
 
 class LocalizationParams(BaseModel):
@@ -55,6 +65,7 @@ class LingoDotDevEngine:
         """
         self.config = EngineConfig(**config)
         self._client: Optional[httpx.AsyncClient] = None
+        self._session_id: str = generate()
 
     async def __aenter__(self):
         """Async context manager entry"""
@@ -71,7 +82,7 @@ class LingoDotDevEngine:
             self._client = httpx.AsyncClient(
                 headers={
                     "Content-Type": "application/json; charset=utf-8",
-                    "Authorization": f"Bearer {self.config.api_key}",
+                    "X-API-Key": self.config.api_key,
                 },
                 timeout=60.0,
             )
@@ -134,7 +145,6 @@ class LingoDotDevEngine:
         """
         await self._ensure_client()
         chunked_payload = self._extract_payload_chunks(payload)
-        workflow_id = generate()
 
         if concurrent and not progress_callback:
             # Process chunks concurrently for better performance
@@ -144,7 +154,6 @@ class LingoDotDevEngine:
                     params.source_locale,
                     params.target_locale,
                     {"data": chunk, "reference": params.reference},
-                    workflow_id,
                     params.fast or False,
                 )
                 tasks.append(task)
@@ -160,7 +169,6 @@ class LingoDotDevEngine:
                     params.source_locale,
                     params.target_locale,
                     {"data": chunk, "reference": params.reference},
-                    workflow_id,
                     params.fast or False,
                 )
 
@@ -182,7 +190,6 @@ class LingoDotDevEngine:
         source_locale: Optional[str],
         target_locale: str,
         payload: Dict[str, Any],
-        workflow_id: str,
         fast: bool,
     ) -> Dict[str, str]:
         """
@@ -192,7 +199,6 @@ class LingoDotDevEngine:
             source_locale: Source locale
             target_locale: Target locale
             payload: Payload containing the chunk to be localized
-            workflow_id: Workflow ID for tracking
             fast: Whether to use fast mode
 
         Returns:
@@ -200,14 +206,17 @@ class LingoDotDevEngine:
         """
         await self._ensure_client()
         assert self._client is not None  # Type guard for mypy
-        url = urljoin(self.config.api_url, "/i18n")
 
-        request_data = {
-            "params": {"workflowId": workflow_id, "fast": fast},
-            "locale": {"source": source_locale, "target": target_locale},
+        url = f"{self.config.api_url}/process/localize"
+        request_data: Dict[str, Any] = {
+            "params": {"fast": fast},
+            "sourceLocale": source_locale,
+            "targetLocale": target_locale,
             "data": payload["data"],
+            "sessionId": self._session_id,
         }
-
+        if self.config.engine_id:
+            request_data["engineId"] = self.config.engine_id
         if payload.get("reference"):
             request_data["reference"] = payload["reference"]
 
@@ -455,7 +464,8 @@ class LingoDotDevEngine:
 
         await self._ensure_client()
         assert self._client is not None  # Type guard for mypy
-        url = urljoin(self.config.api_url, "/recognize")
+
+        url = f"{self.config.api_url}/process/recognize"
 
         try:
             response = await self._client.post(url, json={"text": text})
@@ -487,10 +497,11 @@ class LingoDotDevEngine:
         """
         await self._ensure_client()
         assert self._client is not None  # Type guard for mypy
-        url = urljoin(self.config.api_url, "/whoami")
+
+        url = f"{self.config.api_url}/users/me"
 
         try:
-            response = await self._client.post(url)
+            response = await self._client.get(url)
 
             if response.is_success:
                 payload = self._safe_parse_json(response)
@@ -539,7 +550,8 @@ class LingoDotDevEngine:
         api_key: str,
         target_locale: str,
         source_locale: Optional[str] = None,
-        api_url: str = "https://engine.lingo.dev",
+        engine_id: Optional[str] = None,
+        api_url: str = "https://api.lingo.dev",
         fast: bool = True,
     ) -> Any:
         """
@@ -551,6 +563,7 @@ class LingoDotDevEngine:
             api_key: Your Lingo.dev API key
             target_locale: Target language code (e.g., 'es', 'fr')
             source_locale: Source language code (optional, auto-detected if None)
+            engine_id: Optional engine ID for the API
             api_url: API endpoint URL
             fast: Enable fast mode for quicker translations
 
@@ -562,6 +575,7 @@ class LingoDotDevEngine:
             result = await LingoDotDevEngine.quick_translate(
                 "Hello world",
                 "your-api-key",
+                "your-engine-id",
                 "es"
             )
 
@@ -569,13 +583,16 @@ class LingoDotDevEngine:
             result = await LingoDotDevEngine.quick_translate(
                 {"greeting": "Hello", "farewell": "Goodbye"},
                 "your-api-key",
+                "your-engine-id",
                 "es"
             )
         """
-        config = {
+        config: Dict[str, Any] = {
             "api_key": api_key,
             "api_url": api_url,
         }
+        if engine_id:
+            config["engine_id"] = engine_id
 
         async with cls(config) as engine:
             params = {
@@ -598,7 +615,8 @@ class LingoDotDevEngine:
         api_key: str,
         target_locales: List[str],
         source_locale: Optional[str] = None,
-        api_url: str = "https://engine.lingo.dev",
+        engine_id: Optional[str] = None,
+        api_url: str = "https://api.lingo.dev",
         fast: bool = True,
     ) -> List[Any]:
         """
@@ -610,6 +628,7 @@ class LingoDotDevEngine:
             api_key: Your Lingo.dev API key
             target_locales: List of target language codes (e.g., ['es', 'fr', 'de'])
             source_locale: Source language code (optional, auto-detected if None)
+            engine_id: Optional engine ID for the API
             api_url: API endpoint URL
             fast: Enable fast mode for quicker translations
 
@@ -624,10 +643,12 @@ class LingoDotDevEngine:
             )
             # Results: ["Hola mundo", "Bonjour le monde", "Hallo Welt"]
         """
-        config = {
+        config: Dict[str, Any] = {
             "api_key": api_key,
             "api_url": api_url,
         }
+        if engine_id:
+            config["engine_id"] = engine_id
 
         async with cls(config) as engine:
             if isinstance(content, str):

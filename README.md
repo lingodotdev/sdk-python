@@ -8,7 +8,6 @@ A powerful async-first localization engine that supports various content types i
 - 🔀 **Concurrent processing** for dramatically faster bulk translations
 - 🎯 **Multiple content types**: text, objects, chat messages, and more
 - 🌐 **Auto-detection** of source languages
-- ⚡ **Fast mode** for quick translations
 - 🔧 **Flexible configuration** with progress callbacks
 - 📦 **Context manager** support for proper resource management
 
@@ -39,6 +38,7 @@ async def main():
     result = await LingoDotDevEngine.quick_translate(
         "Hello, world!",
         api_key="your-api-key",
+        engine_id="your-engine-id",
         target_locale="es"
     )
     print(result)  # "¡Hola, mundo!"
@@ -55,9 +55,9 @@ from lingodotdev import LingoDotDevEngine
 async def main():
     config = {
         "api_key": "your-api-key",
-        "api_url": "https://engine.lingo.dev"  # Optional, defaults to this
+        "engine_id": "your-engine-id",  # Optional
     }
-    
+
     async with LingoDotDevEngine(config) as engine:
         # Translate text
         text_result = await engine.localize_text(
@@ -89,6 +89,7 @@ async def batch_example():
     results = await LingoDotDevEngine.quick_batch_translate(
         "Welcome to our application",
         api_key="your-api-key",
+        engine_id="your-engine-id",
         target_locales=["es", "fr", "de", "it"]
     )
     # Results: ["Bienvenido...", "Bienvenue...", "Willkommen...", "Benvenuto..."]
@@ -103,7 +104,7 @@ async def progress_example():
 
     large_content = {f"item_{i}": f"Content {i}" for i in range(1000)}
     
-    async with LingoDotDevEngine({"api_key": "your-api-key"}) as engine:
+    async with LingoDotDevEngine({"api_key": "your-api-key", "engine_id": "your-engine-id"}) as engine:
         result = await engine.localize_object(
             large_content,
             {"target_locale": "es"},
@@ -122,7 +123,7 @@ async def chat_example():
         {"name": "Charlie", "text": "Great to see you all!"}
     ]
     
-    async with LingoDotDevEngine({"api_key": "your-api-key"}) as engine:
+    async with LingoDotDevEngine({"api_key": "your-api-key", "engine_id": "your-engine-id"}) as engine:
         translated_chat = await engine.localize_chat(
             chat_messages,
             {"source_locale": "en", "target_locale": "es"}
@@ -140,7 +141,7 @@ async def concurrent_objects_example():
         {"success": "Account created", "next": "Continue to dashboard"}
     ]
     
-    async with LingoDotDevEngine({"api_key": "your-api-key"}) as engine:
+    async with LingoDotDevEngine({"api_key": "your-api-key", "engine_id": "your-engine-id"}) as engine:
         results = await engine.batch_localize_objects(
             objects,
             {"target_locale": "fr"}
@@ -152,7 +153,7 @@ async def concurrent_objects_example():
 
 ```python
 async def detection_example():
-    async with LingoDotDevEngine({"api_key": "your-api-key"}) as engine:
+    async with LingoDotDevEngine({"api_key": "your-api-key", "engine_id": "your-engine-id"}) as engine:
         detected = await engine.recognize_locale("Bonjour le monde")
         print(detected)  # "fr"
 ```
@@ -162,7 +163,8 @@ async def detection_example():
 ```python
 config = {
     "api_key": "your-api-key",              # Required: Your API key
-    "api_url": "https://engine.lingo.dev",  # Optional: API endpoint
+    "engine_id": "your-engine-id",          # Optional: Your engine ID
+    "api_url": "https://api.lingo.dev",     # Optional: API endpoint
     "batch_size": 25,                       # Optional: Items per batch (1-250)
     "ideal_batch_item_size": 250            # Optional: Target words per batch (1-2500)
 }
@@ -173,7 +175,6 @@ config = {
 ### Translation Parameters
 - **source_locale**: Source language code (auto-detected if None)
 - **target_locale**: Target language code (required)
-- **fast**: Enable fast mode for quicker translations
 - **reference**: Reference translations for context
 - **concurrent**: Process chunks concurrently (faster, but no progress callbacks)
 
@@ -186,7 +187,7 @@ config = {
 ```python
 async def error_handling_example():
     try:
-        async with LingoDotDevEngine({"api_key": "invalid-key"}) as engine:
+        async with LingoDotDevEngine({"api_key": "invalid-key", "engine_id": "your-engine-id"}) as engine:
             result = await engine.localize_text("Hello", {"target_locale": "es"})
     except ValueError as e:
         print(f"Invalid request: {e}")
