@@ -233,4 +233,4 @@ Apache-2.0 License
 
 - 📚 [Documentation](https://lingo.dev/docs)
 - 🐛 [Issues](https://github.com/lingodotdev/sdk-python/issues)
-- 💬 [Community](https://old.lingo.dev/go/discord)
+- 💬 [Community](https://discord.gg/rJ8zGYJQj5)
